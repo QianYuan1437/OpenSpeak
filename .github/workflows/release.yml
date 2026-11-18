@@ -58,8 +58,14 @@ jobs:
         run: |
           New-Item -ItemType Directory dist | Out-Null
           Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath dist\OpenSpeak-${{ needs.version.outputs.name }}-windows-x64.zip
-          choco install innosetup --no-progress -y
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVersion=${{ needs.version.outputs.name }} /Odist windows\installer.iss
+          $iscc = Get-ChildItem "${env:ProgramFiles(x86)}\Inno Setup*\ISCC.exe", "$env:ProgramFiles\Inno Setup*\ISCC.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $iscc) {
+            choco install innosetup --no-progress -y
+            $iscc = Get-ChildItem "${env:ProgramFiles(x86)}\Inno Setup*\ISCC.exe", "$env:ProgramFiles\Inno Setup*\ISCC.exe" | Select-Object -First 1
+          }
+          Write-Host "Using $($iscc.FullName)"
+          & $iscc.FullName /DAppVersion=${{ needs.version.outputs.name }} /Odist windows\installer.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
         with: { name: windows, path: dist/* }
 
@@ -71,7 +77,7 @@ jobs:
       - run: |
           sudo apt-get update
           sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev \
-            libstdc++-12-dev libayatana-appindicator3-dev libx11-dev
+            libstdc++-12-dev libayatana-appindicator3-dev libx11-dev lld
       - uses: subosito/flutter-action@v2
         with: { flutter-version: '${{ env.FLUTTER_VERSION }}', channel: stable, cache: true }
       - run: flutter build linux --release --build-name=${{ needs.version.outputs.name }} --build-number=${{ github.run_number }}
