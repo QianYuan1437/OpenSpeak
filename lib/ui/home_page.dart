@@ -293,7 +293,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           controller: _text,
           minLines: 5,
           maxLines: 14,
-          onChanged: dictation.setTranscript,
+          onChanged: (v) {
+            dictation.setTranscript(v);
+            // Refresh the copy/clear buttons after manual edits.
+            setState(() {});
+          },
           style: const TextStyle(fontSize: 15, height: 1.6),
           decoration: InputDecoration(
             hintText: t('在这里点击麦克风说话，文字会出现在这里；在其他应用中用快捷键说话，文字会直接输入到那个应用。',

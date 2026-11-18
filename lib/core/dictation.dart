@@ -112,10 +112,12 @@ class Dictation extends ChangeNotifier {
   Future<void> ensureModel({bool force = false}) async {
     final spec = currentModel;
     if (spec == null || !models.isInstalled(spec)) return;
-    var provider = settings.useGpu && gpu.ready ? 'cuda' : 'cpu';
-    // The CPU and CUDA builds share DLL names; once the CPU one is loaded the
-    // GPU build only takes effect after a restart.
-    if (provider == 'cuda' && GpuManager.cpuLibLoaded) provider = 'cpu';
+    // The CPU and CUDA builds share DLL names, so whichever loads first stays
+    // for the rest of the process; switching takes a restart.
+    final gpuLib = GpuManager.gpuLibLoaded || settings.useGpu && gpu.ready && !GpuManager.cpuLibLoaded;
+    // Small int8 models already decode in ~0.1 s on the CPU and lose accuracy
+    // under CUDA, so only the models marked for the GPU use it.
+    final provider = gpuLib && settings.useGpu && spec.gpuRecommended ? 'cuda' : 'cpu';
     if (!force &&
         engine.isLoaded &&
         loadedModelId == spec.id &&
@@ -136,11 +138,15 @@ class Dictation extends ChangeNotifier {
         threads: settings.threads,
         language: settings.language,
         partial: spec.supportsPartial,
-        libDir: provider == 'cuda' ? gpu.libDir : null,
+        libDir: gpuLib ? gpu.libDir : null,
       ));
       loadedModelId = spec.id;
       loadedProvider = provider;
-      if (provider == 'cpu') GpuManager.cpuLibLoaded = true;
+      if (gpuLib) {
+        GpuManager.gpuLibLoaded = true;
+      } else {
+        GpuManager.cpuLibLoaded = true;
+      }
       state = DictationState.idle;
     } catch (e) {
       loadedModelId = null;

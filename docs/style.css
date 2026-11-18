@@ -59,7 +59,11 @@ h3 { margin: 10px 0 6px; font-size: 18px; }
 .version { color: var(--muted); font-size: 14px; min-height: 1.4em; }
 .shots { position: relative; margin: 32px auto 0; max-width: 920px; }
 .shots img { width: 100%; border-radius: var(--radius); border: 1px solid var(--line); box-shadow: 0 30px 60px -30px rgba(40, 40, 90, .45); }
-.shots .pill { position: absolute; width: 46%; right: -2%; bottom: -8%; border-radius: 14px; }
+.shots .pill {
+  position: absolute; width: 50%; left: 25%; bottom: -6%;
+  border: 0; border-radius: 0; box-shadow: none;
+  filter: drop-shadow(0 18px 28px rgba(20, 20, 40, .45));
+}
 
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; padding-top: 96px; }
 .grid article { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 22px 24px; }
@@ -96,5 +100,5 @@ footer { text-align: center; color: var(--muted); padding: 56px 16px 40px; font-
 
 @media (max-width: 640px) {
   .nav nav a:not([href^="http"]) { display: none; }
-  .shots .pill { position: static; width: 100%; margin-top: 12px; }
+  .shots .pill { position: static; width: 90%; margin: 14px auto 0; display: block; }
 }

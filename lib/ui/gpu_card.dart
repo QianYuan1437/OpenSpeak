@@ -28,6 +28,8 @@ class GpuCard extends StatelessWidget {
     final pr = gpu.progress;
     final on = settings.useGpu && gpu.ready;
     final running = dictation.loadedProvider == 'cuda';
+    final needsRestart = on && GpuManager.cpuLibLoaded;
+    final model = dictation.currentModel;
     return SectionCard(
       title: t('GPU 加速', 'GPU acceleration'),
       icon: Icons.bolt_rounded,
@@ -48,10 +50,13 @@ class GpuCard extends StatelessWidget {
           Text(
             on && running
                 ? t('正在使用 GPU（CUDA）识别。', 'Recognizing on the GPU (CUDA).')
-                : on && GpuManager.cpuLibLoaded
+                : needsRestart
                     ? t('已开启，重启 OpenSpeak 后生效。', 'Enabled — restart OpenSpeak to apply.')
-                    : t('CUDA 加速包已安装。开启后 FireRed / Qwen3 / FP32 等大模型识别更快。',
-                        'CUDA pack installed. Turn on to speed up large models (FireRed / Qwen3 / FP32).'),
+                    : on && model != null && !model.gpuRecommended
+                        ? t('当前模型在 CPU 上已经很快，仍用 CPU；切换到 FireRed / Qwen3 / SenseVoice FP32 时自动使用 GPU。',
+                            'The current model is already fast on the CPU; GPU is used for FireRed / Qwen3 / SenseVoice FP32.')
+                        : t('CUDA 加速包已安装。开启后 FireRed / Qwen3 / FP32 等大模型识别更快。',
+                            'CUDA pack installed. Turn on to speed up large models (FireRed / Qwen3 / FP32).'),
             style: muted,
           )
         else
@@ -87,7 +92,7 @@ class GpuCard extends StatelessWidget {
               onPressed: () => gpu.install(),
             )
           else ...[
-            if (on && GpuManager.cpuLibLoaded && !running)
+            if (needsRestart && !running)
               FilledButton.icon(
                 icon: const Icon(Icons.restart_alt_rounded, size: 18),
                 label: Text(t('立即重启', 'Restart now')),

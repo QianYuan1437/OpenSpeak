@@ -8,10 +8,12 @@ import 'package:openspeak/core/model_catalog.dart';
 import 'asr_engine_test.dart' show readWav;
 
 /// Runs every catalog model found under OS_MODELS_ROOT on the SenseVoice
-/// test clips (skips models that are not downloaded).
+/// test clips (skips models that are not downloaded). OS_PROVIDER=cuda with
+/// OS_LIB_DIR pointing at an installed GPU pack runs them on the GPU.
 void main() {
   final root = Platform.environment['OS_MODELS_ROOT'] ?? '';
   final libDir = Platform.environment['OS_LIB_DIR'];
+  final provider = Platform.environment['OS_PROVIDER'] ?? 'cpu';
   final clips = '$root/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09/test_wavs';
 
   for (final m in kModels) {
@@ -30,6 +32,7 @@ void main() {
         threads: 4,
         partial: false,
         libDir: libDir,
+        provider: provider,
       ));
       final loadMs = sw.elapsedMilliseconds;
       for (final name in ['zh.wav', 'en.wav']) {

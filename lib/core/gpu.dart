@@ -48,6 +48,10 @@ class GpuManager extends ChangeNotifier {
   /// GPU build then needs a restart (same DLL names).
   static bool cpuLibLoaded = false;
 
+  /// The GPU build of the native libraries was loaded in this process. It
+  /// also runs CPU models, so it stays in use until the app restarts.
+  static bool gpuLibLoaded = false;
+
   bool get supported => Platform.isWindows || Platform.isLinux;
   bool get available => gpuName != null;
   bool get busy => progress != null;
