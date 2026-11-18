@@ -10,6 +10,7 @@ import '../core/settings.dart';
 import 'home_shell.dart';
 import 'i18n.dart';
 import 'theme.dart';
+import 'perf_card.dart';
 import 'widgets.dart';
 
 class HomePage extends StatefulWidget {
@@ -86,6 +87,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             _recorderCard(context, installed),
             if (Platform.isAndroid) _bubbleCard(context),
             _transcriptCard(context),
+            const PerfCard(),
           ],
         );
       },
@@ -125,6 +127,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Widget _noModelCard(BuildContext context, ModelSpec? spec) {
     final m = spec ?? kModels.first;
     final busy = models.progress[m.id];
+    final partial = busy == null ? models.partialBytes(m) : 0;
+    Future<void> download() async {
+      await models.download(m);
+      if (models.isInstalled(m)) {
+        await settings.update((s) => s.modelId = m.id);
+        await dictation.ensureModel();
+      }
+    }
+
     return Card(
       color: Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.5),
       child: Padding(
@@ -139,9 +150,18 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               const SizedBox(height: 4),
               Text('${m.name} · ${m.sizeMB} MB · ${m.langs}',
                   style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
-              if (busy != null) ...[
-                const SizedBox(height: 8),
-                LinearProgressIndicator(value: busy.fraction, borderRadius: BorderRadius.circular(4)),
+              if (busy != null || partial > 0) ...[
+                const SizedBox(height: 10),
+                DownloadPanel(
+                  received: busy?.received ?? partial,
+                  total: busy?.total ?? m.sizeMB * 1024 * 1024,
+                  source: busy?.source,
+                  extracting: busy?.stage == 'extract',
+                  paused: busy == null,
+                  onPause: () => models.pause(m),
+                  onResume: download,
+                  onCancel: () => models.cancel(m),
+                ),
               ],
               if (models.errors[m.id] != null) ...[
                 const SizedBox(height: 6),
@@ -152,18 +172,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               ],
             ]),
           ),
-          const SizedBox(width: 12),
-          busy != null
-              ? TextButton(onPressed: () => models.cancel(m), child: Text(t('取消', 'Cancel')))
-              : FilledButton(
-                  onPressed: () async {
-                    await models.download(m);
-                    if (models.isInstalled(m)) {
-                      await settings.update((s) => s.modelId = m.id);
-                      await dictation.ensureModel();
-                    }
-                  },
-                  child: Text(t('一键下载', 'Download'))),
+          if (busy == null && partial == 0) ...[
+            const SizedBox(width: 12),
+            FilledButton(onPressed: download, child: Text(t('一键下载', 'Download'))),
+          ],
         ]),
       ),
     );

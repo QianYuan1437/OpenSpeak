@@ -9,16 +9,22 @@ import 'asr_engine_test.dart' show readWav;
 
 /// Runs every catalog model found under OS_MODELS_ROOT on the SenseVoice
 /// test clips (skips models that are not downloaded). OS_PROVIDER=cuda with
-/// OS_LIB_DIR pointing at an installed GPU pack runs them on the GPU.
+/// OS_LIB_DIR pointing at an installed GPU pack runs them on the GPU;
+/// OS_MODEL_ID limits the run to one model.
 void main() {
   final root = Platform.environment['OS_MODELS_ROOT'] ?? '';
   final libDir = Platform.environment['OS_LIB_DIR'];
   final provider = Platform.environment['OS_PROVIDER'] ?? 'cpu';
+  final only = Platform.environment['OS_MODEL_ID'];
   final clips = '$root/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09/test_wavs';
 
   for (final m in kModels) {
     final dir = '$root/${m.dir}';
     test(m.id, () async {
+      if (only != null && only != m.id) {
+        markTestSkipped('OS_MODEL_ID=$only');
+        return;
+      }
       if (!Directory(dir).existsSync()) {
         markTestSkipped('not downloaded');
         return;

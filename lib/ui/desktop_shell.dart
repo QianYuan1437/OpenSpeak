@@ -15,7 +15,7 @@ class DesktopShell with WindowListener, TrayListener {
   DesktopShell._();
   static final _instance = DesktopShell._();
 
-  static Future<void> init({bool forceShow = false}) async {
+  static Future<void> init({required bool show}) async {
     await windowManager.ensureInitialized();
     const options = WindowOptions(
       size: Size(1000, 700),
@@ -25,7 +25,7 @@ class DesktopShell with WindowListener, TrayListener {
       titleBarStyle: TitleBarStyle.normal,
     );
     await windowManager.waitUntilReadyToShow(options, () async {
-      if (forceShow || !settings.startHidden) {
+      if (show) {
         await windowManager.show();
         await windowManager.focus();
       }

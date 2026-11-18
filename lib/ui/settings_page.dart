@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../app_state.dart';
 import '../core/audio_capture.dart';
+import '../core/autostart.dart';
 import '../core/dictation.dart';
 import '../core/mic_profiles.dart';
 import '../core/settings.dart';
@@ -67,16 +68,25 @@ class _SettingsPageState extends State<SettingsPage> {
   Widget build(BuildContext context) {
     return ListenableBuilder(
       listenable: Listenable.merge([settings, dictation]),
-      builder: (context, _) => PageFrame(
-        title: t('设置', 'Settings'),
-        children: [
-          _micSection(context),
-          if (_desktop) _hotkeySection(context),
-          _recognitionSection(context),
-          _appearanceSection(context),
-          _aboutSection(context),
-        ],
-      ),
+      builder: (context, _) {
+        final mic = _micSection(context);
+        final hotkey = _desktop ? _hotkeySection(context) : null;
+        final recognition = _recognitionSection(context);
+        final appearance = _appearanceSection(context);
+        final startup = _desktop ? _startupSection(context) : null;
+        final about = _aboutSection(context);
+        return PageFrame(
+          title: t('设置', 'Settings'),
+          maxWidth: 1180,
+          children: [
+            TwoColumn(
+              left: [mic, recognition, ?startup],
+              right: [?hotkey, appearance, about],
+              narrow: [mic, ?hotkey, recognition, appearance, ?startup, about],
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -99,22 +109,21 @@ class _SettingsPageState extends State<SettingsPage> {
           subtitle: value == null ? t('自动：优先无线麦克风，否则系统默认', 'Auto: wireless mic first, else system default') : null,
           trailing: OsDropdown<String?>(
             value: value,
-            maxWidth: 340,
+            maxWidth: 240,
             items: [
-              DropdownMenuItem(
-                value: null,
-                child: Text(t('自动', 'Auto')),
-              ),
+              DropdownMenuItem(value: null, child: Text(t('自动', 'Auto'))),
               for (final d in dictation.devices)
                 DropdownMenuItem(
                   value: d.id,
-                  child: Row(children: [
-                    if (detectMicBrand(d.label) != null) ...[
-                      Icon(Icons.settings_input_antenna_rounded, size: 16, color: scheme.primary),
-                      const SizedBox(width: 6),
+                  child: Row(
+                    children: [
+                      if (detectMicBrand(d.label) != null) ...[
+                        Icon(Icons.settings_input_antenna_rounded, size: 16, color: scheme.primary),
+                        const SizedBox(width: 6),
+                      ],
+                      Expanded(child: Text(d.label, overflow: TextOverflow.ellipsis)),
                     ],
-                    Expanded(child: Text(d.label, overflow: TextOverflow.ellipsis)),
-                  ]),
+                  ),
                 ),
             ],
             onChanged: (v) async {
@@ -131,18 +140,25 @@ class _SettingsPageState extends State<SettingsPage> {
               color: scheme.primaryContainer.withValues(alpha: 0.45),
               borderRadius: BorderRadius.circular(12),
             ),
-            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Icon(Icons.verified_rounded, size: 18, color: scheme.primary),
-              const SizedBox(width: 8),
-              Expanded(child: Text(L.zh ? brand.tipZh : brand.tipEn)),
-            ]),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.verified_rounded, size: 18, color: scheme.primary),
+                const SizedBox(width: 8),
+                Expanded(child: Text(L.zh ? brand.tipZh : brand.tipEn)),
+              ],
+            ),
           ),
         ],
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
           title: Text(t('自动切换到无线麦克风', 'Auto-switch to wireless mics')),
-          subtitle: Text(t('插入 DJI / Godox / 影石 Insta360 / RØDE 等接收器时自动使用',
-              'Use DJI / Godox / Insta360 / RØDE receivers as soon as they are plugged in')),
+          subtitle: Text(
+            t(
+              '插入 DJI / Godox / 影石 Insta360 / RØDE 等接收器时自动使用',
+              'Use DJI / Godox / Insta360 / RØDE receivers as soon as they are plugged in',
+            ),
+          ),
           value: settings.preferWireless,
           onChanged: (v) async {
             await settings.update((s) => s.preferWireless = v);
@@ -165,21 +181,23 @@ class _SettingsPageState extends State<SettingsPage> {
           },
         ),
         const SizedBox(height: 12),
-        Row(children: [
-          Text(t('增益', 'Gain'), style: TextStyle(color: scheme.onSurfaceVariant)),
-          Expanded(
-            child: Slider(
-              min: -12,
-              max: 24,
-              divisions: 36,
-              value: settings.gainDb,
-              label: '${settings.gainDb.round()} dB',
-              onChanged: (v) => settings.update((s) => s.gainDb = v),
-              onChangeEnd: (_) => _restartTest(),
+        Row(
+          children: [
+            Text(t('增益', 'Gain'), style: TextStyle(color: scheme.onSurfaceVariant)),
+            Expanded(
+              child: Slider(
+                min: -12,
+                max: 24,
+                divisions: 36,
+                value: settings.gainDb,
+                label: '${settings.gainDb.round()} dB',
+                onChanged: (v) => settings.update((s) => s.gainDb = v),
+                onChangeEnd: (_) => _restartTest(),
+              ),
             ),
-          ),
-          SizedBox(width: 56, child: Text('${settings.gainDb.round()} dB', textAlign: TextAlign.end)),
-        ]),
+            SizedBox(width: 56, child: Text('${settings.gainDb.round()} dB', textAlign: TextAlign.end)),
+          ],
+        ),
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
           title: Text(t('自动增益', 'Auto gain')),
@@ -190,15 +208,17 @@ class _SettingsPageState extends State<SettingsPage> {
             await _restartTest();
           },
         ),
-        Row(children: [
-          OutlinedButton.icon(
-            icon: Icon(_testing ? Icons.stop_rounded : Icons.graphic_eq_rounded, size: 18),
-            label: Text(_testing ? t('停止测试', 'Stop test') : t('测试麦克风', 'Test microphone')),
-            onPressed: dictation.isActive ? null : _toggleTest,
-          ),
-          const SizedBox(width: 16),
-          if (_testing) const Expanded(child: LevelBars(bars: 36, height: 28, color: kListening)),
-        ]),
+        Row(
+          children: [
+            OutlinedButton.icon(
+              icon: Icon(_testing ? Icons.stop_rounded : Icons.graphic_eq_rounded, size: 18),
+              label: Text(_testing ? t('停止测试', 'Stop test') : t('测试麦克风', 'Test microphone')),
+              onPressed: dictation.isActive ? null : _toggleTest,
+            ),
+            const SizedBox(width: 16),
+            if (_testing) const Expanded(child: LevelBars(bars: 36, height: 28, color: kListening)),
+          ],
+        ),
       ],
     );
   }
@@ -220,84 +240,56 @@ class _SettingsPageState extends State<SettingsPage> {
         SegmentedButton<TriggerMode>(
           segments: [
             ButtonSegment(
-                value: TriggerMode.hold,
-                icon: const Icon(Icons.touch_app_rounded, size: 18),
-                label: Text(t('按住说话', 'Hold to talk'))),
+              value: TriggerMode.hold,
+              icon: const Icon(Icons.touch_app_rounded, size: 18),
+              label: Text(t('按住说话', 'Hold to talk')),
+            ),
             ButtonSegment(
-                value: TriggerMode.toggle,
-                icon: const Icon(Icons.toggle_on_outlined, size: 18),
-                label: Text(t('按一下开始/结束', 'Press to toggle'))),
+              value: TriggerMode.toggle,
+              icon: const Icon(Icons.toggle_on_outlined, size: 18),
+              label: Text(t('按一下开始/结束', 'Press to toggle')),
+            ),
           ],
           selected: {settings.trigger},
           onSelectionChanged: (v) => settings.update((s) => s.trigger = v.first),
         ),
         const SizedBox(height: 14),
-        Row(children: [
-          Text(t('按键', 'Key'), style: TextStyle(color: scheme.onSurfaceVariant)),
-          const SizedBox(width: 12),
-          OsDropdown<String>(
+        SettingRow(
+          title: t('按键', 'Key'),
+          subtitle: '${t('当前', 'Current')}: ${h.label}',
+          trailing: OsDropdown<String>(
             value: h.key,
-            items: [
-              for (final k in Hotkey.keys) DropdownMenuItem(value: k, child: Text(Hotkey.keyLabels[k] ?? k)),
-            ],
+            maxWidth: 200,
+            items: [for (final k in Hotkey.keys) DropdownMenuItem(value: k, child: Text(Hotkey.keyLabels[k] ?? k))],
             onChanged: (v) => setKey(h.copyWith(key: v)),
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Wrap(spacing: 6, runSpacing: 6, children: [
-              FilterChip(label: const Text('Ctrl'), selected: h.ctrl, onSelected: (v) => setKey(h.copyWith(ctrl: v))),
-              FilterChip(label: const Text('Alt'), selected: h.alt, onSelected: (v) => setKey(h.copyWith(alt: v))),
-              FilterChip(label: const Text('Shift'), selected: h.shift, onSelected: (v) => setKey(h.copyWith(shift: v))),
-              FilterChip(
-                  label: Text(Platform.isWindows ? 'Win' : 'Super'),
-                  selected: h.meta,
-                  onSelected: (v) => setKey(h.copyWith(meta: v))),
-            ]),
-          ),
-        ]),
+        ),
+        Text(
+          t('组合键（可多选，可不选）', 'Modifiers (optional, any combination)'),
+          style: TextStyle(color: scheme.onSurfaceVariant),
+        ),
         const SizedBox(height: 6),
-        Text('${t('当前', 'Current')}: ${h.label}', style: TextStyle(color: scheme.outline, fontSize: 12)),
-        const SizedBox(height: 16),
-        Text(t('录音浮条', 'Recording pill'), style: TextStyle(color: scheme.onSurfaceVariant)),
-        const SizedBox(height: 6),
-        Wrap(spacing: 12, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
-          SegmentedButton<String>(
-            segments: [
-              ButtonSegment(value: 'center', label: Text(t('屏幕中央', 'Center'))),
-              ButtonSegment(value: 'top', label: Text(t('顶部', 'Top'))),
-              ButtonSegment(value: 'bottom', label: Text(t('底部', 'Bottom'))),
-            ],
-            selected: {settings.pillPosition},
-            onSelectionChanged: (v) => settings.update((s) => s.pillPosition = v.first),
-          ),
-          OutlinedButton.icon(
-            icon: const Icon(Icons.visibility_outlined, size: 18),
-            label: Text(t('预览', 'Preview')),
-            onPressed: dictation.isActive
-                ? null
-                : () async {
-                    await dictation.previewPill(t('这是录音浮条的预览效果', 'This is how the pill looks'));
-                    await DesktopShell.showMain();
-                  },
-          ),
-        ]),
-        Row(children: [
-          Text(t('不透明度', 'Opacity'), style: TextStyle(color: scheme.onSurfaceVariant)),
-          Expanded(
-            child: Slider(
-              min: 0.5,
-              max: 1.0,
-              divisions: 10,
-              value: settings.pillOpacity.clamp(0.5, 1.0),
-              label: '${(settings.pillOpacity * 100).round()}%',
-              onChanged: (v) => settings.update((s) => s.pillOpacity = v),
+        SegmentedButton<String>(
+          multiSelectionEnabled: true,
+          emptySelectionAllowed: true,
+          segments: [
+            const ButtonSegment(value: 'ctrl', label: Text('Ctrl')),
+            const ButtonSegment(value: 'alt', label: Text('Alt')),
+            const ButtonSegment(value: 'shift', label: Text('Shift')),
+            ButtonSegment(value: 'meta', label: Text(Platform.isWindows ? 'Win' : 'Super')),
+          ],
+          selected: {if (h.ctrl) 'ctrl', if (h.alt) 'alt', if (h.shift) 'shift', if (h.meta) 'meta'},
+          onSelectionChanged: (v) => setKey(
+            h.copyWith(
+              ctrl: v.contains('ctrl'),
+              alt: v.contains('alt'),
+              shift: v.contains('shift'),
+              meta: v.contains('meta'),
             ),
           ),
-          SizedBox(width: 44, child: Text('${(settings.pillOpacity * 100).round()}%', textAlign: TextAlign.end)),
-        ]),
-        const SizedBox(height: 12),
-        Text(t('输出到当前应用的方式', 'How text reaches the focused app'),
-            style: TextStyle(color: scheme.onSurfaceVariant)),
+        ),
+        const SizedBox(height: 16),
+        Text(t('输出到当前应用的方式', 'How text reaches the focused app'), style: TextStyle(color: scheme.onSurfaceVariant)),
         const SizedBox(height: 6),
         SegmentedButton<OutputMode>(
           segments: [
@@ -309,23 +301,27 @@ class _SettingsPageState extends State<SettingsPage> {
           onSelectionChanged: (v) => settings.update((s) => s.output = v.first),
         ),
         const SizedBox(height: 4),
-        Text(
-          switch (settings.output) {
-            OutputMode.type => t('逐字键入，不占用剪贴板（推荐）', 'Types characters directly; clipboard untouched (recommended)'),
-            OutputMode.paste => t('通过剪贴板粘贴，长文本更快，粘贴后恢复原剪贴板', 'Pastes via clipboard (faster for long text), then restores it'),
-            OutputMode.clipboard => t('只复制到剪贴板，由你手动粘贴', 'Only copies; you paste manually'),
-          },
-          style: TextStyle(color: scheme.outline, fontSize: 12),
-        ),
+        Text(switch (settings.output) {
+          OutputMode.type => t('逐字键入，不占用剪贴板（推荐）', 'Types characters directly; clipboard untouched (recommended)'),
+          OutputMode.paste => t(
+            '通过剪贴板粘贴，长文本更快，粘贴后恢复原剪贴板',
+            'Pastes via clipboard (faster for long text), then restores it',
+          ),
+          OutputMode.clipboard => t('只复制到剪贴板，由你手动粘贴', 'Only copies; you paste manually'),
+        }, style: TextStyle(color: scheme.outline, fontSize: 12)),
         if (Platform.isLinux)
           FutureBuilder<bool>(
             future: dictation.output.hasXdotool,
             builder: (context, snap) => snap.data == false
                 ? Padding(
                     padding: const EdgeInsets.only(top: 8),
-                    child: Text(t('未找到 xdotool，将仅复制到剪贴板。请执行：sudo apt install xdotool',
-                        'xdotool not found; falling back to clipboard. Run: sudo apt install xdotool'),
-                        style: TextStyle(color: scheme.error, fontSize: 12)),
+                    child: Text(
+                      t(
+                        '未找到 xdotool，将仅复制到剪贴板。请执行：sudo apt install xdotool',
+                        'xdotool not found; falling back to clipboard. Run: sudo apt install xdotool',
+                      ),
+                      style: TextStyle(color: scheme.error, fontSize: 12),
+                    ),
                   )
                 : const SizedBox.shrink(),
           ),
@@ -375,89 +371,174 @@ class _SettingsPageState extends State<SettingsPage> {
           value: settings.stripTrailingPeriod,
           onChanged: (v) => settings.update((s) => s.stripTrailingPeriod = v),
         ),
-        Row(children: [
-          Text(t('CPU 线程', 'CPU threads'), style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
-          Expanded(
-            child: Slider(
-              min: 1,
-              max: maxThreads.toDouble(),
-              divisions: maxThreads > 1 ? maxThreads - 1 : null,
-              value: settings.threads.clamp(1, maxThreads).toDouble(),
-              label: '${settings.threads}',
-              onChanged: (v) => settings.update((s) => s.threads = v.round()),
-              onChangeEnd: (_) => dictation.ensureModel(force: true),
+        Row(
+          children: [
+            Text(t('CPU 线程', 'CPU threads'), style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+            Expanded(
+              child: Slider(
+                min: 1,
+                max: maxThreads.toDouble(),
+                divisions: maxThreads > 1 ? maxThreads - 1 : null,
+                value: settings.threads.clamp(1, maxThreads).toDouble(),
+                label: '${settings.threads}',
+                onChanged: (v) => settings.update((s) => s.threads = v.round()),
+                onChangeEnd: (_) => dictation.ensureModel(force: true),
+              ),
             ),
-          ),
-          SizedBox(width: 32, child: Text('${settings.threads}', textAlign: TextAlign.end)),
-        ]),
+            SizedBox(width: 32, child: Text('${settings.threads}', textAlign: TextAlign.end)),
+          ],
+        ),
         if (dictation.loadMs != null && dictation.state != DictationState.loading)
-          Text('${t('模型加载耗时', 'Model load time')}: ${dictation.loadMs} ms',
-              style: TextStyle(color: Theme.of(context).colorScheme.outline, fontSize: 12)),
+          Text(
+            '${t('模型加载耗时', 'Model load time')}: ${dictation.loadMs} ms',
+            style: TextStyle(color: Theme.of(context).colorScheme.outline, fontSize: 12),
+          ),
       ],
     );
   }
 
   Widget _appearanceSection(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final pill = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SizedBox(height: 16),
+        Text(t('录音浮条', 'Recording pill'), style: TextStyle(color: scheme.onSurfaceVariant)),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 12,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            SegmentedButton<String>(
+              segments: [
+                ButtonSegment(value: 'center', label: Text(t('屏幕中央', 'Center'))),
+                ButtonSegment(value: 'top', label: Text(t('顶部', 'Top'))),
+                ButtonSegment(value: 'bottom', label: Text(t('底部', 'Bottom'))),
+              ],
+              selected: {settings.pillPosition},
+              onSelectionChanged: (v) => settings.update((s) => s.pillPosition = v.first),
+            ),
+            OutlinedButton.icon(
+              icon: const Icon(Icons.visibility_outlined, size: 18),
+              label: Text(t('预览', 'Preview')),
+              onPressed: dictation.isActive
+                  ? null
+                  : () async {
+                      await dictation.previewPill(t('这是录音浮条的预览效果', 'This is how the pill looks'));
+                      await DesktopShell.showMain();
+                    },
+            ),
+          ],
+        ),
+        Row(
+          children: [
+            Text(t('不透明度', 'Opacity'), style: TextStyle(color: scheme.onSurfaceVariant)),
+            Expanded(
+              child: Slider(
+                min: 0.5,
+                max: 1.0,
+                divisions: 10,
+                value: settings.pillOpacity.clamp(0.5, 1.0),
+                label: '${(settings.pillOpacity * 100).round()}%',
+                onChanged: (v) => settings.update((s) => s.pillOpacity = v),
+              ),
+            ),
+            SizedBox(width: 44, child: Text('${(settings.pillOpacity * 100).round()}%', textAlign: TextAlign.end)),
+          ],
+        ),
+      ],
+    );
     return SectionCard(
-      title: t('外观与启动', 'Appearance & startup'),
+      title: t('外观', 'Appearance'),
       icon: Icons.palette_outlined,
       children: [
         Text(t('主题色', 'Accent color'), style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
         const SizedBox(height: 8),
-        Wrap(spacing: 10, runSpacing: 10, children: [
-          for (final (argb, zh, en) in kAccentPresets)
-            Tooltip(
-              message: t(zh, en),
-              child: InkWell(
-                customBorder: const CircleBorder(),
-                onTap: () => settings.update((s) => s.accent = argb),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 150),
-                  width: 34,
-                  height: 34,
-                  decoration: BoxDecoration(
-                    color: Color(argb),
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: settings.accent == argb ? Theme.of(context).colorScheme.onSurface : Colors.transparent,
-                      width: 2.5,
+        Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: [
+            for (final (argb, zh, en) in kAccentPresets)
+              Tooltip(
+                message: t(zh, en),
+                child: InkWell(
+                  customBorder: const CircleBorder(),
+                  onTap: () => settings.update((s) => s.accent = argb),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 150),
+                    width: 34,
+                    height: 34,
+                    decoration: BoxDecoration(
+                      color: Color(argb),
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: settings.accent == argb ? Theme.of(context).colorScheme.onSurface : Colors.transparent,
+                        width: 2.5,
+                      ),
                     ),
+                    child: settings.accent == argb
+                        ? const Icon(Icons.check_rounded, color: Colors.white, size: 18)
+                        : null,
                   ),
-                  child: settings.accent == argb
-                      ? const Icon(Icons.check_rounded, color: Colors.white, size: 18)
-                      : null,
                 ),
               ),
-            ),
-        ]),
+          ],
+        ),
         const SizedBox(height: 16),
-        Wrap(spacing: 16, runSpacing: 12, crossAxisAlignment: WrapCrossAlignment.center, children: [
-          SegmentedButton<ThemeMode>(
-            segments: [
-              ButtonSegment(value: ThemeMode.system, label: Text(t('跟随系统', 'System'))),
-              ButtonSegment(value: ThemeMode.light, label: Text(t('浅色', 'Light'))),
-              ButtonSegment(value: ThemeMode.dark, label: Text(t('深色', 'Dark'))),
-            ],
-            selected: {settings.themeMode},
-            onSelectionChanged: (v) => settings.update((s) => s.themeMode = v.first),
-          ),
-          SegmentedButton<String>(
-            segments: const [
-              ButtonSegment(value: 'system', label: Text('Auto')),
-              ButtonSegment(value: 'zh', label: Text('中文')),
-              ButtonSegment(value: 'en', label: Text('English')),
-            ],
-            selected: {settings.uiLanguage},
-            onSelectionChanged: (v) => settings.update((s) => s.uiLanguage = v.first),
-          ),
-        ]),
-        if (_desktop)
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: Text(t('启动时隐藏到托盘', 'Start hidden in tray')),
-            value: settings.startHidden,
-            onChanged: (v) => settings.update((s) => s.startHidden = v),
-          ),
+        Wrap(
+          spacing: 16,
+          runSpacing: 12,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            SegmentedButton<ThemeMode>(
+              segments: [
+                ButtonSegment(value: ThemeMode.system, label: Text(t('跟随系统', 'System'))),
+                ButtonSegment(value: ThemeMode.light, label: Text(t('浅色', 'Light'))),
+                ButtonSegment(value: ThemeMode.dark, label: Text(t('深色', 'Dark'))),
+              ],
+              selected: {settings.themeMode},
+              onSelectionChanged: (v) => settings.update((s) => s.themeMode = v.first),
+            ),
+            SegmentedButton<String>(
+              segments: const [
+                ButtonSegment(value: 'system', label: Text('Auto')),
+                ButtonSegment(value: 'zh', label: Text('中文')),
+                ButtonSegment(value: 'en', label: Text('English')),
+              ],
+              selected: {settings.uiLanguage},
+              onSelectionChanged: (v) => settings.update((s) => s.uiLanguage = v.first),
+            ),
+          ],
+        ),
+        if (_desktop) ...[pill],
+      ],
+    );
+  }
+
+  Widget _startupSection(BuildContext context) {
+    final autostart = Autostart.enabled;
+    return SectionCard(
+      title: t('启动', 'Startup'),
+      icon: Icons.power_settings_new_rounded,
+      children: [
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: Text(t('开机自动启动', 'Start at sign-in')),
+          subtitle: Text(t('登录后在托盘中静默运行，快捷键随时可用', 'Runs quietly in the tray after you sign in')),
+          value: autostart,
+          onChanged: (v) async {
+            await Autostart.setEnabled(v);
+            setState(() {});
+          },
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: Text(t('手动打开时也隐藏到托盘', 'Start hidden when opened manually')),
+          subtitle: Text(t('关闭窗口始终是隐藏到托盘，从托盘菜单退出', 'Closing the window always keeps it in the tray')),
+          value: settings.startHidden,
+          onChanged: (v) => settings.update((s) => s.startHidden = v),
+        ),
       ],
     );
   }
@@ -467,16 +548,21 @@ class _SettingsPageState extends State<SettingsPage> {
       title: t('关于', 'About'),
       icon: Icons.info_outline_rounded,
       children: [
-        Text('OpenSpeak $appVersionLabel — ${t('开源、离线、跨平台的语音输入工具', 'open-source, offline, cross-platform voice typing')}'),
+        Text(
+          'OpenSpeak $appVersionLabel — ${t('开源、离线、跨平台的语音输入工具', 'open-source, offline, cross-platform voice typing')}',
+        ),
         const SizedBox(height: 4),
         SelectableText(kRepoUrl, style: TextStyle(color: Theme.of(context).colorScheme.primary)),
         const SizedBox(height: 4),
-        Text(t('识别引擎：sherpa-onnx（k2-fsa）· 模型版权归各自作者', 'Engine: sherpa-onnx (k2-fsa) · models © their authors'),
-            style: TextStyle(color: Theme.of(context).colorScheme.outline, fontSize: 12)),
+        Text(
+          t('识别引擎：sherpa-onnx（k2-fsa）· 模型版权归各自作者', 'Engine: sherpa-onnx (k2-fsa) · models © their authors'),
+          style: TextStyle(color: Theme.of(context).colorScheme.outline, fontSize: 12),
+        ),
         Align(
           alignment: Alignment.centerLeft,
           child: TextButton(
-            onPressed: () => showLicensePage(context: context, applicationName: 'OpenSpeak', applicationVersion: kAppVersion),
+            onPressed: () =>
+                showLicensePage(context: context, applicationName: 'OpenSpeak', applicationVersion: kAppVersion),
             child: Text(t('开源许可', 'Licenses')),
           ),
         ),

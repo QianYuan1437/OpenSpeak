@@ -24,6 +24,7 @@ class ModelSpec {
     this.mobile = true,
     this.supportsPartial = true,
     this.punctuation = true,
+    this.vramMB = 0,
   });
 
   final String id;
@@ -51,6 +52,10 @@ class ModelSpec {
   final bool supportsPartial;
   final bool punctuation;
 
+  /// Peak GPU memory (MiB) when run with CUDA, CUDA runtime included;
+  /// measured with sherpa-onnx 2.0.1 on an RTX 3090 (+ ~10 % headroom).
+  final int vramMB;
+
   String get archive => '$dir.tar.bz2';
 }
 
@@ -65,6 +70,7 @@ const kModels = <ModelSpec>[
     sizeMB: 228,
     dir: 'sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09',
     files: {'model': 'model.int8.onnx', 'tokens': 'tokens.txt'},
+    vramMB: 350,
   ),
   ModelSpec(
     id: 'sense-voice-fp32',
@@ -78,6 +84,7 @@ const kModels = <ModelSpec>[
     files: {'model': 'model.onnx', 'tokens': 'tokens.txt'},
     gpuRecommended: true,
     mobile: false,
+    vramMB: 0,
   ),
   ModelSpec(
     id: 'paraformer-zh-small',
@@ -90,6 +97,7 @@ const kModels = <ModelSpec>[
     dir: 'sherpa-onnx-paraformer-zh-small-2024-03-09',
     files: {'model': 'model.int8.onnx', 'tokens': 'tokens.txt'},
     punctuation: false,
+    vramMB: 400,
   ),
   ModelSpec(
     id: 'fire-red-asr2-ctc',
@@ -105,6 +113,7 @@ const kModels = <ModelSpec>[
     gpuRecommended: true,
     mobile: false,
     punctuation: false,
+    vramMB: 450,
   ),
   ModelSpec(
     id: 'qwen3-asr-0.6b',
@@ -125,6 +134,7 @@ const kModels = <ModelSpec>[
     gpuRecommended: true,
     mobile: false,
     supportsPartial: false,
+    vramMB: 1250,
   ),
 ];
 

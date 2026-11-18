@@ -39,7 +39,7 @@ Name: "{group}\OpenSpeak"; Filename: "{app}\openspeak.exe"
 Name: "{autodesktop}\OpenSpeak"; Filename: "{app}\openspeak.exe"; Tasks: desktopicon
 
 [Registry]
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "OpenSpeak"; ValueData: """{app}\openspeak.exe"""; Flags: uninsdeletevalue; Tasks: autostart
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "OpenSpeak"; ValueData: """{app}\openspeak.exe"" --hidden"; Flags: uninsdeletevalue; Tasks: autostart
 
 [Run]
 Filename: "{app}\openspeak.exe"; Description: "{cm:LaunchProgram,OpenSpeak}"; Flags: nowait postinstall skipifsilent

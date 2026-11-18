@@ -5,6 +5,7 @@ import '../core/model_catalog.dart';
 import 'gpu_card.dart';
 import 'home_shell.dart';
 import 'i18n.dart';
+import 'theme.dart';
 import 'widgets.dart';
 
 class ModelsPage extends StatelessWidget {
@@ -34,22 +35,32 @@ class _ModelTile extends StatelessWidget {
   const _ModelTile(this.m);
   final ModelSpec m;
 
+  Future<void> _download() async {
+    await models.download(m);
+    if (models.isInstalled(m) && !models.isInstalled(modelById(settings.modelId) ?? m)) {
+      await settings.update((s) => s.modelId = m.id);
+    }
+    await dictation.ensureModel();
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final installed = models.isInstalled(m);
     final selected = settings.modelId == m.id;
     final busy = models.progress[m.id];
+    final partial = busy == null ? models.partialBytes(m) : 0;
     final err = models.errors[m.id];
+    final meta = TextStyle(color: scheme.outline, fontSize: 12);
     return Card(
       shape: selected
           ? RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(18),
+              borderRadius: BorderRadius.circular(kCardRadius),
               side: BorderSide(color: scheme.primary, width: 1.6))
           : null,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(18, 16, 14, 16),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -61,26 +72,28 @@ class _ModelTile extends StatelessWidget {
                 ]),
                 const SizedBox(height: 6),
                 Text(L.zh ? m.descZh : m.descEn, style: TextStyle(color: scheme.onSurfaceVariant, height: 1.4)),
-                const SizedBox(height: 6),
-                Text('${m.langs} · ${m.sizeMB} MB',
-                    style: TextStyle(color: scheme.outline, fontSize: 12)),
+                const SizedBox(height: 8),
+                Wrap(spacing: 14, runSpacing: 4, children: [
+                  _meta(Icons.translate_rounded, m.langs, meta),
+                  _meta(Icons.save_alt_rounded, '${m.sizeMB} MB', meta),
+                  if (gpu.available) _vram(context, meta),
+                ]),
               ]),
             ),
             const SizedBox(width: 12),
-            _actions(context, installed, selected, busy != null),
+            if (busy == null && partial == 0) _actions(context, installed, selected),
           ]),
-          if (busy != null) ...[
-            const SizedBox(height: 12),
-            LinearProgressIndicator(
-                value: busy.stage == 'extract' ? null : busy.fraction,
-                borderRadius: BorderRadius.circular(4)),
-            const SizedBox(height: 6),
-            Text(
-              busy.stage == 'extract'
-                  ? t('正在解压…', 'Extracting…')
-                  : '${formatBytes(busy.received)} / ${formatBytes(busy.total)}'
-                      '${busy.source != null ? ' · ${busy.source}' : ''}',
-              style: TextStyle(fontSize: 12, color: scheme.outline),
+          if (busy != null || partial > 0) ...[
+            const SizedBox(height: 14),
+            DownloadPanel(
+              received: busy?.received ?? partial,
+              total: busy?.total ?? m.sizeMB * 1024 * 1024,
+              source: busy?.source,
+              extracting: busy?.stage == 'extract',
+              paused: busy == null,
+              onPause: () => models.pause(m),
+              onResume: _download,
+              onCancel: () => models.cancel(m),
             ),
           ],
           if (err != null) ...[
@@ -93,21 +106,36 @@ class _ModelTile extends StatelessWidget {
     );
   }
 
-  Widget _actions(BuildContext context, bool installed, bool selected, bool busy) {
-    if (busy) {
-      return TextButton(onPressed: () => models.cancel(m), child: Text(t('取消', 'Cancel')));
+  Widget _meta(IconData icon, String text, TextStyle style) => Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(icon, size: 14, color: style.color),
+        const SizedBox(width: 4),
+        Text(text, style: style),
+      ]);
+
+  /// Estimated GPU memory; models outside the GPU set run on the CPU.
+  Widget _vram(BuildContext context, TextStyle style) {
+    if (!m.gpuRecommended || m.vramMB == 0) {
+      return _meta(Icons.memory_rounded, t('CPU 运行 · 不占显存', 'Runs on CPU · no VRAM'), style);
     }
+    final total = gpu.memoryTotalMB;
+    final gb = (m.vramMB / 1024).toStringAsFixed(1);
+    final text = total != null
+        ? t('显存约 $gb GB / ${(total / 1024).toStringAsFixed(0)} GB', 'VRAM ≈ $gb GB / ${(total / 1024).toStringAsFixed(0)} GB')
+        : t('显存约 $gb GB', 'VRAM ≈ $gb GB');
+    final tight = total != null && m.vramMB > total * 0.8;
+    return Tooltip(
+      message: t('使用 GPU 加速时的预估显存占用（实测峰值，含 CUDA 运行时）',
+          'Estimated GPU memory with CUDA (measured peak incl. the CUDA runtime)'),
+      child: _meta(Icons.memory_rounded, text, tight ? style.copyWith(color: Theme.of(context).colorScheme.error) : style),
+    );
+  }
+
+  Widget _actions(BuildContext context, bool installed, bool selected) {
     if (!installed) {
       return FilledButton.tonalIcon(
         icon: const Icon(Icons.download_rounded, size: 18),
         label: Text(t('下载', 'Download')),
-        onPressed: () async {
-          await models.download(m);
-          if (models.isInstalled(m) && !models.isInstalled(modelById(settings.modelId) ?? m)) {
-            await settings.update((s) => s.modelId = m.id);
-          }
-          await dictation.ensureModel();
-        },
+        onPressed: _download,
       );
     }
     return Row(mainAxisSize: MainAxisSize.min, children: [
@@ -119,14 +147,14 @@ class _ModelTile extends StatelessWidget {
           },
           child: Text(t('使用', 'Use')),
         ),
-      PopupMenuButton<String>(
-        onSelected: (v) async {
-          if (v == 'delete') {
+      OsMoreMenu(
+        tooltip: t('更多', 'More'),
+        actions: [
+          OsMenuAction(Icons.delete_outline_rounded, t('删除模型', 'Delete model'), () async {
             if (selected) await dictation.engine.dispose();
             await models.delete(m);
-          }
-        },
-        itemBuilder: (_) => [PopupMenuItem(value: 'delete', child: Text(t('删除模型', 'Delete model')))],
+          }, destructive: true),
+        ],
       ),
     ]);
   }

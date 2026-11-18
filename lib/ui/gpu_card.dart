@@ -65,15 +65,17 @@ class GpuCard extends StatelessWidget {
                 'Needs the CUDA pack (~1.5 GB incl. cuDNN / cuBLAS, mostly from PyPI mirrors); no CUDA toolkit install required.'),
             style: muted,
           ),
-        if (pr != null) ...[
-          const SizedBox(height: 10),
-          LinearProgressIndicator(value: pr.stage == 'extract' ? null : pr.fraction, borderRadius: BorderRadius.circular(4)),
-          const SizedBox(height: 6),
-          Text(
-            pr.stage == 'extract'
-                ? '${t('正在解压', 'Extracting')} ${pr.source ?? ''}'
-                : '${formatBytes(pr.received)} / ${formatBytes(pr.total)} · ${pr.source ?? ''}',
-            style: TextStyle(fontSize: 12, color: scheme.outline),
+        if (pr != null || gpu.paused) ...[
+          const SizedBox(height: 14),
+          DownloadPanel(
+            received: pr?.received ?? gpu.partialBytes,
+            total: pr?.total ?? gpu.lastTotal,
+            source: pr?.source,
+            extracting: pr?.stage == 'extract',
+            paused: pr == null,
+            onPause: gpu.pause,
+            onResume: dictation.installGpu,
+            onCancel: gpu.cancel,
           ),
         ],
         if (gpu.error != null) ...[
@@ -83,8 +85,8 @@ class GpuCard extends StatelessWidget {
         ],
         const SizedBox(height: 10),
         Wrap(spacing: 8, runSpacing: 8, children: [
-          if (pr != null)
-            OutlinedButton(onPressed: gpu.cancel, child: Text(t('取消', 'Cancel')))
+          if (pr != null || gpu.paused)
+            const SizedBox.shrink()
           else if (!gpu.ready)
             FilledButton.tonalIcon(
               icon: const Icon(Icons.download_rounded, size: 18),

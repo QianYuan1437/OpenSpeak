@@ -35,6 +35,10 @@ class ModelManager extends ChangeNotifier {
   final Map<String, String> errors = {};
   final Set<String> _cancelled = {};
 
+  /// Stopped downloads whose partial files should be deleted (cancel) rather
+  /// than kept for resuming (pause).
+  final Set<String> _discard = {};
+
   Future<void> init() async {
     final support = await getApplicationSupportDirectory();
     root = Directory(p.join(support.path, 'models'));
@@ -59,7 +63,47 @@ class ModelManager extends ChangeNotifier {
 
   bool isBusy(ModelSpec m) => progress.containsKey(m.id);
 
-  void cancel(ModelSpec m) => _cancelled.add(m.id);
+  /// Stops the download and keeps what was fetched; [download] resumes it.
+  void pause(ModelSpec m) => _cancelled.add(m.id);
+
+  /// Stops the download (or drops a paused one) and deletes partial files.
+  Future<void> cancel(ModelSpec m) async {
+    if (isBusy(m)) {
+      _discard.add(m.id);
+      _cancelled.add(m.id);
+      return;
+    }
+    await _discardPartial(m);
+    notifyListeners();
+  }
+
+  /// Bytes already on disk for a model that is not installed yet (a paused
+  /// or interrupted download, also across restarts).
+  int partialBytes(ModelSpec m) {
+    if (isInstalled(m)) return 0;
+    var n = 0;
+    final d = dirOf(m);
+    if (d.existsSync()) {
+      for (final f in d.listSync(recursive: true)) {
+        if (f is File) n += f.lengthSync();
+      }
+    }
+    for (final f in [File(p.join(root.path, m.archive)), File(p.join(root.path, '${m.archive}.part'))]) {
+      if (f.existsSync()) n += f.lengthSync();
+    }
+    return n;
+  }
+
+  bool isPaused(ModelSpec m) => !isBusy(m) && partialBytes(m) > 0;
+
+  Future<void> _discardPartial(ModelSpec m) async {
+    if (isInstalled(m)) return;
+    final d = dirOf(m);
+    if (await d.exists()) await d.delete(recursive: true);
+    for (final f in [File(p.join(root.path, m.archive)), File(p.join(root.path, '${m.archive}.part'))]) {
+      if (await f.exists()) await f.delete();
+    }
+  }
 
   Future<void> delete(ModelSpec m) async {
     final d = dirOf(m);
@@ -97,7 +141,8 @@ class ModelManager extends ChangeNotifier {
         throw Exception(failures.join('\n'));
       }
     } on DownloadCancelled {
-      // Leave .part files so the next attempt resumes.
+      // Paused: leave .part files so the next attempt resumes.
+      if (_discard.remove(m.id)) await _discardPartial(m);
     } catch (e) {
       errors[m.id] = e.toString();
     } finally {

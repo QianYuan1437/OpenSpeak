@@ -22,6 +22,12 @@ const kRadius = 14.0;
 const kCardRadius = 18.0;
 final kControlShape = RoundedRectangleBorder(borderRadius: BorderRadius.circular(kRadius));
 
+/// Height shared by buttons, dropdowns and segmented buttons.
+const kControlHeight = 40.0;
+
+/// Rounded highlight of an item inside a menu (inset from the menu edge).
+final kMenuItemShape = RoundedRectangleBorder(borderRadius: BorderRadius.circular(kRadius - 4));
+
 ThemeData buildTheme(Brightness b, {int accent = kDefaultAccent}) {
   final scheme = ColorScheme.fromSeed(seedColor: Color(accent), brightness: b);
   final dark = b == Brightness.dark;
@@ -37,7 +43,9 @@ ThemeData buildTheme(Brightness b, {int accent = kDefaultAccent}) {
     surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
     elevation: const WidgetStatePropertyAll(6),
     shape: WidgetStatePropertyAll(kControlShape),
-    padding: const WidgetStatePropertyAll(EdgeInsets.symmetric(vertical: 6)),
+    side: WidgetStatePropertyAll(BorderSide(color: outline)),
+    padding: const WidgetStatePropertyAll(EdgeInsets.all(6)),
+    maximumSize: const WidgetStatePropertyAll(Size(double.infinity, 420)),
   );
 
   return ThemeData(
@@ -83,6 +91,18 @@ ThemeData buildTheme(Brightness b, {int accent = kDefaultAccent}) {
     ),
     dropdownMenuTheme: DropdownMenuThemeData(menuStyle: menuStyle),
     menuTheme: MenuThemeData(style: menuStyle),
+    menuButtonTheme: MenuButtonThemeData(
+      style: ButtonStyle(
+        shape: WidgetStatePropertyAll(kMenuItemShape),
+        minimumSize: const WidgetStatePropertyAll(Size(160, kControlHeight)),
+        padding: const WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 12)),
+        overlayColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.pressed)
+            ? scheme.primary.withValues(alpha: 0.12)
+            : s.contains(WidgetState.hovered) || s.contains(WidgetState.focused)
+                ? scheme.primary.withValues(alpha: 0.08)
+                : null),
+      ),
+    ),
     popupMenuTheme: PopupMenuThemeData(
       color: surface,
       surfaceTintColor: Colors.transparent,
@@ -96,7 +116,7 @@ ThemeData buildTheme(Brightness b, {int accent = kDefaultAccent}) {
     ),
     segmentedButtonTheme: SegmentedButtonThemeData(
       style: ButtonStyle(
-        visualDensity: VisualDensity.compact,
+        minimumSize: const WidgetStatePropertyAll(Size(0, kControlHeight)),
         shape: WidgetStatePropertyAll(kControlShape),
         side: WidgetStatePropertyAll(BorderSide(color: outline)),
       ),

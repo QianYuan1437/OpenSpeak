@@ -7,6 +7,7 @@ import 'core/audio_capture.dart' show isDesktop;
 import 'core/dictation.dart';
 import 'core/gpu.dart';
 import 'core/model_manager.dart';
+import 'core/perf_monitor.dart';
 import 'core/settings.dart';
 import 'ui/desktop_shell.dart';
 import 'ui/home_shell.dart';
@@ -14,7 +15,8 @@ import 'ui/i18n.dart';
 import 'ui/pill_view.dart';
 import 'ui/theme.dart';
 
-/// `--install-gpu` opens the Models page and starts downloading the CUDA pack.
+/// `--install-gpu` opens the Models page and starts downloading the CUDA pack;
+/// `--hidden` (used by start-at-sign-in) starts in the tray.
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
   settings = Settings();
@@ -25,11 +27,14 @@ Future<void> main(List<String> args) async {
   gpu = GpuManager();
   await gpu.init();
   dictation = Dictation(settings, models, gpu);
+  perf = PerfMonitor(gpu);
   final installGpu = args.contains('--install-gpu') && gpu.available && !gpu.ready;
   if (installGpu) {
     HomeShell.initialPage = 2;
   }
-  if (isDesktop) await DesktopShell.init(forceShow: installGpu);
+  if (isDesktop) {
+    await DesktopShell.init(show: installGpu || !(settings.startHidden || args.contains('--hidden')));
+  }
   runApp(const OpenSpeakApp());
   unawaited(dictation.init());
   if (installGpu) unawaited(dictation.installGpu());

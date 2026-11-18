@@ -98,9 +98,11 @@ class _HomeShellState extends State<HomeShell> {
 
 /// Common page scaffold: title + scrollable, width-limited content.
 class PageFrame extends StatelessWidget {
-  const PageFrame({super.key, required this.title, this.actions = const [], required this.children});
+  const PageFrame(
+      {super.key, required this.title, this.actions = const [], required this.children, this.maxWidth = 860});
 
   final String title;
+  final double maxWidth;
   final List<Widget> actions;
   final List<Widget> children;
 
@@ -112,7 +114,7 @@ class PageFrame extends StatelessWidget {
       children: [
         Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 860),
+            constraints: BoxConstraints(maxWidth: maxWidth),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [

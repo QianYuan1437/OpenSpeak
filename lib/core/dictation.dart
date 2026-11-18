@@ -69,6 +69,10 @@ class Dictation extends ChangeNotifier {
   String? loadedModelId;
   String? loadedProvider;
   int? loadMs;
+
+  /// Timing of the most recent utterance (for the performance card).
+  int? lastAudioMs;
+  int? lastDecodeMs;
   List<InputDevice> devices = [];
   InputDevice? activeDevice;
   final List<HistoryItem> history = [];
@@ -190,7 +194,11 @@ class Dictation extends ChangeNotifier {
       case AsrSegment(:final text):
         segments.add(text);
         partial = '';
-      case AsrFinal():
+      case AsrFinal(:final audioMs, :final decodeMs):
+        if (audioMs > 0) {
+          lastAudioMs = audioMs;
+          lastDecodeMs = decodeMs;
+        }
         unawaited(_onFinal(ev));
     }
     _pushBubble();

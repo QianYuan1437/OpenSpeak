@@ -39,6 +39,7 @@ class GpuManager extends ChangeNotifier {
 
   String? gpuName;
   String? driverVersion;
+  int? memoryTotalMB;
   late Directory packDir;
   DownloadProgress? progress;
   String? error;
@@ -67,11 +68,12 @@ class GpuManager extends ChangeNotifier {
     if (!supported) return;
     try {
       final r = await Process.run('nvidia-smi',
-          ['--query-gpu=name,driver_version', '--format=csv,noheader']);
+          ['--query-gpu=name,driver_version,memory.total', '--format=csv,noheader,nounits']);
       if (r.exitCode == 0) {
         final line = (r.stdout as String).trim().split('\n').first.split(',');
         gpuName = line.first.trim();
         if (line.length > 1) driverVersion = line[1].trim();
+        if (line.length > 2) memoryTotalMB = int.tryParse(line[2].trim());
       }
     } catch (_) {
       // No NVIDIA driver.
@@ -95,7 +97,48 @@ class GpuManager extends ChangeNotifier {
 
   String get _platformTag => Platform.isWindows ? 'win_amd64' : 'manylinux';
 
-  void cancel() => _cancel = true;
+  /// Stops the download and keeps what was fetched; [install] resumes it.
+  void pause() => _cancel = true;
+
+  /// Stops the download (or drops a paused one) and deletes partial files.
+  Future<void> cancel() async {
+    if (busy) {
+      _discard = true;
+      _cancel = true;
+      return;
+    }
+    await _discardPartial();
+    notifyListeners();
+  }
+
+  bool _discard = false;
+
+  /// Total size of the last install attempt in this session (0 if unknown).
+  int lastTotal = 0;
+
+  Directory get _tmp => Directory(p.join(packDir.parent.path, 'gpu-download'));
+
+  /// Bytes kept from a paused or interrupted install (also across restarts).
+  int get partialBytes {
+    if (!supported || ready) return 0;
+    var n = 0;
+    for (final d in [_tmp, packDir]) {
+      if (!d.existsSync()) continue;
+      for (final f in d.listSync(recursive: true)) {
+        if (f is File) n += f.lengthSync();
+      }
+    }
+    return n;
+  }
+
+  bool get paused => !busy && partialBytes > 0;
+
+  Future<void> _discardPartial() async {
+    if (ready) return;
+    for (final d in [_tmp, packDir]) {
+      if (await d.exists()) await d.delete(recursive: true);
+    }
+  }
 
   Future<void> uninstall() async {
     if (await packDir.exists()) await packDir.delete(recursive: true);
@@ -149,6 +192,7 @@ class GpuManager extends ChangeNotifier {
         sizes.add(await _length(j.$1.first));
       }
       final total = sizes.fold<int>(0, (a, b) => a + b);
+      lastTotal = total;
       var done = 0;
       for (var i = 0; i < jobs.length; i++) {
         final (urls, hash, name, extract) = jobs[i];
@@ -177,11 +221,15 @@ class GpuManager extends ChangeNotifier {
       }
       await File(p.join(packDir.path, '.complete')).writeAsString('sherpa-onnx $sherpaVersion\n');
     } on DownloadCancelled {
-      // Keep partial downloads for resume.
+      // Paused: keep partial downloads for resume.
     } catch (e) {
       error = '$e';
     } finally {
       await lock?.close();
+      if (_discard) {
+        _discard = false;
+        await _discardPartial();
+      }
       progress = null;
       notifyListeners();
     }
