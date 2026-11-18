@@ -10,12 +10,22 @@ import '../core/mic_profiles.dart';
 import '../core/settings.dart';
 import 'desktop_shell.dart';
 import 'home_shell.dart';
+import 'hotkey_recorder.dart';
 import 'i18n.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
+
+  /// Set before navigating here to scroll to "Updates" and check right away.
+  static final showUpdates = ValueNotifier<int>(0);
+  static bool _pendingUpdates = false;
+
+  static void requestUpdateCheck() {
+    _pendingUpdates = true;
+    showUpdates.value++;
+  }
 
   @override
   State<SettingsPage> createState() => _SettingsPageState();
@@ -28,10 +38,25 @@ class _SettingsPageState extends State<SettingsPage> {
   void initState() {
     super.initState();
     dictation.refreshDevices();
+    SettingsPage.showUpdates.addListener(_focusUpdates);
+    _focusUpdates();
+  }
+
+  final _updatesKey = GlobalKey();
+
+  void _focusUpdates() {
+    if (!SettingsPage._pendingUpdates) return;
+    SettingsPage._pendingUpdates = false;
+    updater.check();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final c = _updatesKey.currentContext;
+      if (c != null) Scrollable.ensureVisible(c, duration: const Duration(milliseconds: 300), alignment: 0.1);
+    });
   }
 
   @override
   void dispose() {
+    SettingsPage.showUpdates.removeListener(_focusUpdates);
     if (_testing) dictation.capture.stop();
     super.dispose();
   }
@@ -67,7 +92,7 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: Listenable.merge([settings, dictation]),
+      listenable: Listenable.merge([settings, dictation, updater]),
       builder: (context, _) {
         final mic = _micSection(context);
         final hotkey = _desktop ? _hotkeySection(context) : null;
@@ -255,38 +280,9 @@ class _SettingsPageState extends State<SettingsPage> {
         ),
         const SizedBox(height: 14),
         SettingRow(
-          title: t('按键', 'Key'),
-          subtitle: '${t('当前', 'Current')}: ${h.label}',
-          trailing: OsDropdown<String>(
-            value: h.key,
-            maxWidth: 200,
-            items: [for (final k in Hotkey.keys) DropdownMenuItem(value: k, child: Text(Hotkey.keyLabels[k] ?? k))],
-            onChanged: (v) => setKey(h.copyWith(key: v)),
-          ),
-        ),
-        Text(
-          t('组合键（可多选，可不选）', 'Modifiers (optional, any combination)'),
-          style: TextStyle(color: scheme.onSurfaceVariant),
-        ),
-        const SizedBox(height: 6),
-        SegmentedButton<String>(
-          multiSelectionEnabled: true,
-          emptySelectionAllowed: true,
-          segments: [
-            const ButtonSegment(value: 'ctrl', label: Text('Ctrl')),
-            const ButtonSegment(value: 'alt', label: Text('Alt')),
-            const ButtonSegment(value: 'shift', label: Text('Shift')),
-            ButtonSegment(value: 'meta', label: Text(Platform.isWindows ? 'Win' : 'Super')),
-          ],
-          selected: {if (h.ctrl) 'ctrl', if (h.alt) 'alt', if (h.shift) 'shift', if (h.meta) 'meta'},
-          onSelectionChanged: (v) => setKey(
-            h.copyWith(
-              ctrl: v.contains('ctrl'),
-              alt: v.contains('alt'),
-              shift: v.contains('shift'),
-              meta: v.contains('meta'),
-            ),
-          ),
+          title: t('快捷键', 'Hotkey'),
+          subtitle: t('点击右侧后按下想用的键或组合键', 'Click, then press the key or combination'),
+          trailing: HotkeyRecorder(value: h, onChanged: setKey),
         ),
         const SizedBox(height: 16),
         Text(t('输出到当前应用的方式', 'How text reaches the focused app'), style: TextStyle(color: scheme.onSurfaceVariant)),
@@ -544,15 +540,83 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Widget _aboutSection(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final u = updater.available;
+    final checked = updater.checkedAt;
+    String hm(DateTime d) => '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
     return SectionCard(
-      title: t('关于', 'About'),
+      key: _updatesKey,
+      title: t('关于与更新', 'About & updates'),
       icon: Icons.info_outline_rounded,
       children: [
+        SettingRow(
+          title: '${t('当前版本', 'Version')} $appVersionLabel',
+          subtitle: updater.checking
+              ? t('正在检查更新…', 'Checking for updates…')
+              : updater.error != null
+                  ? '${t('检查失败', 'Check failed')}: ${updater.error}'
+                  : u != null
+                      ? t('发现新版本 v${u.version}', 'Update available: v${u.version}')
+                      : checked != null
+                          ? t('已是最新版本 · 检查于 ${hm(checked)}', 'Up to date · checked at ${hm(checked)}')
+                          : updater.current.isDev
+                              ? t('开发构建，会收到每次自动构建的更新', 'Development build; offered every CI build')
+                              : t('正式版', 'Release build'),
+          trailing: OutlinedButton.icon(
+            icon: updater.checking
+                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.refresh_rounded, size: 18),
+            label: Text(t('检查更新', 'Check now')),
+            onPressed: updater.checking ? null : updater.check,
+          ),
+        ),
+        if (u != null)
+          Container(
+            margin: const EdgeInsets.only(top: 4, bottom: 8),
+            padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+            decoration: BoxDecoration(
+              color: scheme.primaryContainer.withValues(alpha: 0.45),
+              borderRadius: BorderRadius.circular(kRadius - 2),
+            ),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(
+                u.downloadName != null
+                    ? t('下载后运行安装包即可覆盖升级，设置和模型都会保留。', 'Run the downloaded installer to upgrade; settings and models are kept.')
+                    : t('这个版本没有当前平台的安装包，请到发布页查看。', 'No package for this platform; see the release page.'),
+                style: TextStyle(color: scheme.onSurfaceVariant),
+              ),
+              const SizedBox(height: 10),
+              Wrap(spacing: 8, runSpacing: 8, children: [
+                if (u.downloadUrl != null)
+                  FilledButton.icon(
+                    icon: const Icon(Icons.download_rounded, size: 18),
+                    label: Text(t('下载安装包', 'Download')),
+                    onPressed: () => openUrl(u.downloadUrl!),
+                  ),
+                OutlinedButton.icon(
+                  icon: const Icon(Icons.open_in_new_rounded, size: 18),
+                  label: Text(t('发布说明', 'Release notes')),
+                  onPressed: () => openUrl(u.pageUrl),
+                ),
+              ]),
+            ]),
+          ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: Text(t('启动时自动检查更新', 'Check for updates at startup')),
+          value: settings.autoCheckUpdates,
+          onChanged: (v) => settings.update((s) => s.autoCheckUpdates = v),
+        ),
+        const Divider(height: 20),
         Text(
           'OpenSpeak $appVersionLabel — ${t('开源、离线、跨平台的语音输入工具', 'open-source, offline, cross-platform voice typing')}',
         ),
         const SizedBox(height: 4),
-        SelectableText(kRepoUrl, style: TextStyle(color: Theme.of(context).colorScheme.primary)),
+        InkWell(
+          borderRadius: BorderRadius.circular(6),
+          onTap: () => openUrl(kRepoUrl),
+          child: Text(kRepoUrl, style: TextStyle(color: Theme.of(context).colorScheme.primary)),
+        ),
         const SizedBox(height: 4),
         Text(
           t('识别引擎：sherpa-onnx（k2-fsa）· 模型版权归各自作者', 'Engine: sherpa-onnx (k2-fsa) · models © their authors'),

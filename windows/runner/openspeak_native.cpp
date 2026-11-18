@@ -4,6 +4,7 @@
 #include <flutter_windows.h>
 
 #include <algorithm>
+#include <cctype>
 #include <map>
 #include <string>
 #include <vector>
@@ -30,6 +31,11 @@ DWORD VkFor(const std::string& name) {
   };
   auto it = table.find(name);
   if (it != table.end()) return it->second;
+  // Letters and digits ("A".."Z", "0".."9"): the VK code is the ASCII code.
+  if (name.size() == 1 && (isupper(static_cast<unsigned char>(name[0])) ||
+                           isdigit(static_cast<unsigned char>(name[0])))) {
+    return static_cast<DWORD>(name[0]);
+  }
   if (name.size() >= 2 && name[0] == 'F') {
     int n = atoi(name.c_str() + 1);
     if (n >= 1 && n <= 24) return VK_F1 + (n - 1);
@@ -38,6 +44,14 @@ DWORD VkFor(const std::string& name) {
 }
 
 bool IsDown(int vk) { return (GetAsyncKeyState(vk) & 0x8000) != 0; }
+
+int64_t GetInt(const flutter::EncodableMap& m, const char* key, int64_t def) {
+  auto it = m.find(flutter::EncodableValue(key));
+  if (it == m.end()) return def;
+  if (const int32_t* i = std::get_if<int32_t>(&it->second)) return *i;
+  if (const int64_t* l = std::get_if<int64_t>(&it->second)) return *l;
+  return def;
+}
 
 bool GetBool(const flutter::EncodableMap& m, const char* key) {
   auto it = m.find(flutter::EncodableValue(key));
@@ -116,6 +130,9 @@ void OpenSpeakNative::OnMethodCall(
   } else if (method == "exitPill") {
     ExitPill();
     result->Success();
+  } else if (method == "setTitleBar" && args) {
+    SetTitleBar(GetInt(*args, "color", 0xFFFFFFFF), GetBool(*args, "dark"));
+    result->Success();
   } else if (method == "isWindowActive") {
     bool active = !in_pill_ && IsWindowVisible(window_) && !IsIconic(window_) &&
                   GetForegroundWindow() == window_;
@@ -123,6 +140,22 @@ void OpenSpeakNative::OnMethodCall(
   } else {
     result->NotImplemented();
   }
+}
+
+// Title bar ------------------------------------------------------------------
+
+void OpenSpeakNative::SetTitleBar(int64_t argb, bool dark) {
+  // DWMWA_USE_IMMERSIVE_DARK_MODE: follow the app theme, not the system one.
+  BOOL use_dark = dark ? TRUE : FALSE;
+  DwmSetWindowAttribute(window_, 20, &use_dark, sizeof(use_dark));
+  // Windows 11: paint the caption, its text and the border in the page
+  // colours so the title bar blends in (Windows 10 ignores these).
+  const COLORREF caption = RGB((argb >> 16) & 0xFF, (argb >> 8) & 0xFF, argb & 0xFF);
+  const COLORREF text = dark ? RGB(236, 236, 243) : RGB(27, 27, 36);
+  constexpr DWORD kBorderColor = 34, kCaptionColor = 35, kTextColor = 36;
+  DwmSetWindowAttribute(window_, kCaptionColor, &caption, sizeof(caption));
+  DwmSetWindowAttribute(window_, kTextColor, &text, sizeof(text));
+  DwmSetWindowAttribute(window_, kBorderColor, &caption, sizeof(caption));
 }
 
 // Hotkey ---------------------------------------------------------------------

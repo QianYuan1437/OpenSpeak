@@ -1,6 +1,7 @@
 #include "openspeak_native.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstring>
 #include <map>
@@ -49,6 +50,13 @@ KeySym keysym_for(const std::string& name) {
   };
   auto it = table.find(name);
   if (it != table.end()) return it->second;
+  // Letters and digits ("A".."Z", "0".."9").
+  if (name.size() == 1 && isupper(static_cast<unsigned char>(name[0]))) {
+    return XK_a + (name[0] - 'A');
+  }
+  if (name.size() == 1 && isdigit(static_cast<unsigned char>(name[0]))) {
+    return XK_0 + (name[0] - '0');
+  }
   if (name.size() >= 2 && name[0] == 'F') {
     int n = atoi(name.c_str() + 1);
     if (n >= 1 && n <= 24) return XK_F1 + (n - 1);
@@ -283,6 +291,11 @@ void method_call_cb(FlMethodChannel* channel, FlMethodCall* call, gpointer user_
     response = FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
   } else if (strcmp(method, "exitPill") == 0) {
     exit_pill(arg_int(args, "minWidth", 760), arg_int(args, "minHeight", 540));
+    response = FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
+  } else if (strcmp(method, "setTitleBar") == 0) {
+    // GTK header bars follow the theme variant; match the app's brightness.
+    g_object_set(gtk_settings_get_default(), "gtk-application-prefer-dark-theme",
+                 arg_bool(args, "dark") ? TRUE : FALSE, nullptr);
     response = FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
   } else if (strcmp(method, "isWindowActive") == 0) {
     GtkWindow* win = g_state.window;

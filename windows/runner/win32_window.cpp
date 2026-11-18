@@ -214,7 +214,8 @@ Win32Window::MessageHandler(HWND hwnd,
       return 0;
 
     case WM_DWMCOLORIZATIONCOLORCHANGED:
-      UpdateTheme(hwnd);
+      // OpenSpeak sets the title bar from its own theme (setTitleBar), so
+      // a system theme change must not override it here.
       return 0;
   }
 

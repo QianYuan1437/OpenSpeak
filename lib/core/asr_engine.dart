@@ -73,6 +73,8 @@ class AsrFinal extends AsrEvent {
 class AsrEngine {
   Isolate? _isolate;
   SendPort? _tx;
+  ReceivePort? _rx;
+  Completer<void>? _freed;
   final _events = StreamController<AsrEvent>.broadcast();
   AsrConfig? _config;
   Completer<void>? _ready;
@@ -84,14 +86,19 @@ class AsrEngine {
   Future<void> load(AsrConfig config) async {
     await dispose();
     _config = config;
-    final rx = ReceivePort();
+    final rx = _rx = ReceivePort();
     final ready = _ready = Completer<void>();
+    final freed = _freed = Completer<void>();
     _isolate = await Isolate.spawn(_workerMain, rx.sendPort,
         debugName: 'openspeak-asr');
     rx.listen((msg) {
       if (msg is SendPort) {
         _tx = msg;
         msg.send(_encodeConfig(config));
+        return;
+      }
+      if (msg is Map && msg['t'] == 'freed') {
+        if (!freed.isCompleted) freed.complete();
         return;
       }
       final ev = _decodeEvent(msg as Map);
@@ -119,11 +126,20 @@ class AsrEngine {
   void cancel() => _tx?.send(const {'t': 'cancel'});
 
   Future<void> dispose() async {
-    _tx?.send(const {'t': 'quit'});
+    final tx = _tx, isolate = _isolate, rx = _rx, freed = _freed;
     _tx = null;
-    _isolate?.kill(priority: Isolate.beforeNextEvent);
     _isolate = null;
+    _rx = null;
+    _freed = null;
     _ready = null;
+    if (tx != null && freed != null) {
+      // Native recognizers (and their GPU memory) are only released by the
+      // worker itself; killing the isolate first would leak them.
+      tx.send(const {'t': 'quit'});
+      await freed.future.timeout(const Duration(seconds: 10), onTimeout: () {});
+    }
+    isolate?.kill(priority: Isolate.beforeNextEvent);
+    rx?.close();
   }
 }
 
@@ -193,6 +209,7 @@ void _workerMain(SendPort out) {
         case 'quit':
           worker?.free();
           worker = null;
+          out.send(const {'t': 'freed'});
           inbox.close();
       }
     } catch (e) {

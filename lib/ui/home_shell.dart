@@ -4,6 +4,7 @@ import '../app_state.dart';
 import 'history_page.dart';
 import 'home_page.dart';
 import 'i18n.dart';
+import 'theme.dart';
 import 'models_page.dart';
 import 'settings_page.dart';
 
@@ -79,8 +80,37 @@ class _HomeShellState extends State<HomeShell> {
             child: Align(
               alignment: Alignment.bottomCenter,
               child: Padding(
-                padding: const EdgeInsets.only(bottom: 16),
-                child: Text('v$kAppVersion', style: TextStyle(fontSize: 11, color: scheme.outline)),
+                padding: const EdgeInsets.only(bottom: 12),
+                child: ListenableBuilder(
+                  listenable: updater,
+                  builder: (context, _) => Tooltip(
+                    message: updater.available != null
+                        ? t('发现新版本 v${updater.available!.version}，点击查看', 'v${updater.available!.version} is available')
+                        : t('检查更新', 'Check for updates'),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(8),
+                      onTap: () {
+                        SettingsPage.requestUpdateCheck();
+                        go(3);
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        child: Row(mainAxisSize: MainAxisSize.min, children: [
+                          Text('v${kAppVersion.replaceFirst('-dev.', '.')}',
+                              style: TextStyle(fontSize: 11, color: scheme.outline)),
+                          if (updater.available != null) ...[
+                            const SizedBox(width: 4),
+                            Container(
+                              width: 7,
+                              height: 7,
+                              decoration: const BoxDecoration(color: kListening, shape: BoxShape.circle),
+                            ),
+                          ],
+                        ]),
+                      ),
+                    ),
+                  ),
+                ),
               ),
             ),
           ),
@@ -109,7 +139,16 @@ class PageFrame extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final narrow = MediaQuery.sizeOf(context).width < 720;
-    return ListView(
+    // Content scrolling under the window's top edge fades out over 20 px
+    // instead of being cut off with a hard line.
+    return ShaderMask(
+      blendMode: BlendMode.dstIn,
+      shaderCallback: (rect) => const LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [Color(0x00000000), Color(0xFF000000)],
+      ).createShader(Rect.fromLTWH(0, 0, rect.width, 20)),
+      child: ListView(
       padding: EdgeInsets.fromLTRB(narrow ? 16 : 32, narrow ? 12 : 28, narrow ? 16 : 32, 32),
       children: [
         Center(
@@ -135,6 +174,7 @@ class PageFrame extends StatelessWidget {
           ),
         ),
       ],
+      ),
     );
   }
 }

@@ -22,6 +22,10 @@ SolidCompression=yes
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 WizardStyle=modern
+; Upgrading over a running copy: close it (it would otherwise just hide to
+; the tray) so its files can be replaced.
+CloseApplications=force
+RestartApplications=no
 
 [Languages]
 Name: "chinesesimplified"; MessagesFile: "ChineseSimplified.isl"

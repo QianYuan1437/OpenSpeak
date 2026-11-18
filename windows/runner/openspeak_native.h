@@ -6,6 +6,7 @@
 #include <flutter/standard_method_codec.h>
 #include <windows.h>
 
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
@@ -38,6 +39,7 @@ class OpenSpeakNative {
   bool SendPaste();
   void EnterPill(double width, double height, const std::string& position, double opacity);
   void ExitPill();
+  void SetTitleBar(int64_t argb, bool dark);
 
   static LRESULT CALLBACK KeyboardProc(int code, WPARAM wparam, LPARAM lparam);
 

@@ -1,6 +1,8 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../app_state.dart';
 import '../core/dictation.dart';
@@ -8,10 +10,10 @@ import 'i18n.dart';
 import 'theme.dart';
 
 /// Compact dropdown that sizes itself to the selected item (up to
-/// [maxWidth]). The trigger looks like the app's outlined buttons and the
-/// menu is the shared rounded menu (same as [OsMoreMenu]); the current item
-/// is ticked. Meant to sit at the end of a [SettingRow].
-class OsDropdown<T> extends StatelessWidget {
+/// [maxWidth]). The trigger looks like the app's outlined buttons; the menu
+/// uses the shared rounded menu style, opens centred under the trigger
+/// (above it when there is no room below) and ticks the current item.
+class OsDropdown<T> extends StatefulWidget {
   const OsDropdown({super.key, required this.value, required this.items, required this.onChanged, this.maxWidth = 320});
 
   final T value;
@@ -20,49 +22,130 @@ class OsDropdown<T> extends StatelessWidget {
   final double maxWidth;
 
   @override
+  State<OsDropdown<T>> createState() => _OsDropdownState<T>();
+}
+
+class _OsDropdownState<T> extends State<OsDropdown<T>> {
+  final _link = LayerLink();
+  final _portal = OverlayPortalController();
+  final _tapGroup = Object();
+  bool _above = false;
+  double _maxHeight = 420;
+  double _minWidth = 120;
+
+  void _open() {
+    final box = context.findRenderObject()! as RenderBox;
+    final top = box.localToGlobal(Offset.zero).dy;
+    final screen = MediaQuery.sizeOf(context).height;
+    final below = screen - top - box.size.height - 16;
+    final above = top - 16;
+    _above = below < 240 && above > below;
+    _maxHeight = math.min(420, _above ? above : below);
+    _minWidth = box.size.width;
+    setState(_portal.show);
+  }
+
+  void _close() {
+    if (_portal.isShowing) setState(_portal.hide);
+  }
+
+  @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final current = items.where((i) => i.value == value).firstOrNull;
-    return MenuAnchor(
-      alignmentOffset: const Offset(0, 4),
-      menuChildren: [
-        for (final item in items)
-          MenuItemButton(
-            onPressed: () => onChanged(item.value),
-            leadingIcon: SizedBox(
-              width: 18,
-              child: item.value == value ? Icon(Icons.check_rounded, size: 18, color: scheme.primary) : null,
-            ),
-            child: ConstrainedBox(constraints: BoxConstraints(maxWidth: maxWidth + 40), child: item.child),
+    final current = widget.items.where((i) => i.value == widget.value).firstOrNull;
+    final open = _portal.isShowing;
+    return CompositedTransformTarget(
+      link: _link,
+      child: OverlayPortal(
+        controller: _portal,
+        overlayChildBuilder: (context) => Align(
+          alignment: Alignment.topLeft,
+          child: CompositedTransformFollower(
+            link: _link,
+            targetAnchor: _above ? Alignment.topCenter : Alignment.bottomCenter,
+            followerAnchor: _above ? Alignment.bottomCenter : Alignment.topCenter,
+            offset: Offset(0, _above ? -4 : 4),
+            child: TapRegion(groupId: _tapGroup, onTapOutside: (_) => _close(), child: _menu(context)),
           ),
-      ],
-      builder: (context, controller, _) => ConstrainedBox(
-        constraints: BoxConstraints(minWidth: 120, maxWidth: maxWidth),
-        child: IntrinsicWidth(
-          child: OutlinedButton(
-            style: OutlinedButton.styleFrom(
-              foregroundColor: scheme.onSurface,
-              padding: const EdgeInsets.only(left: 14, right: 8),
-              minimumSize: const Size(0, kControlHeight),
-              alignment: Alignment.centerLeft,
+        ),
+        child: TapRegion(
+          groupId: _tapGroup,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minWidth: 120, maxWidth: widget.maxWidth),
+            child: IntrinsicWidth(
+              child: OutlinedButton(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: scheme.onSurface,
+                  padding: const EdgeInsets.only(left: 14, right: 8),
+                  minimumSize: const Size(0, kControlHeight),
+                  alignment: Alignment.centerLeft,
+                ),
+                onPressed: open ? _close : _open,
+                child: Row(children: [
+                  Expanded(
+                    child: DefaultTextStyle.merge(
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w500),
+                      child: current?.child ?? const SizedBox.shrink(),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  AnimatedRotation(
+                    turns: open ? 0.5 : 0,
+                    duration: const Duration(milliseconds: 150),
+                    child: Icon(Icons.expand_more_rounded, size: 20, color: scheme.onSurfaceVariant),
+                  ),
+                ]),
+              ),
             ),
-            onPressed: () => controller.isOpen ? controller.close() : controller.open(),
-            child: Row(children: [
-              Expanded(
-                child: DefaultTextStyle.merge(
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontWeight: FontWeight.w500),
-                  child: current?.child ?? const SizedBox.shrink(),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _menu(BuildContext context) {
+    final theme = Theme.of(context);
+    final style = theme.menuTheme.style;
+    final side = style?.side?.resolve({}) ?? BorderSide.none;
+    return CallbackShortcuts(
+      bindings: {const SingleActivator(LogicalKeyboardKey.escape): _close},
+      child: FocusScope(
+        autofocus: true,
+        child: TweenAnimationBuilder<double>(
+          tween: Tween(begin: 0, end: 1),
+          duration: const Duration(milliseconds: 120),
+          builder: (context, v, child) => Opacity(opacity: v, child: child),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minWidth: _minWidth, maxWidth: widget.maxWidth + 120, maxHeight: _maxHeight),
+            child: Material(
+              color: style?.backgroundColor?.resolve({}) ?? theme.colorScheme.surface,
+              elevation: 6,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(kRadius), side: side),
+              clipBehavior: Clip.antiAlias,
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(6),
+                child: IntrinsicWidth(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+                    for (final item in widget.items)
+                      MenuItemButton(
+                        onPressed: () {
+                          _close();
+                          widget.onChanged(item.value);
+                        },
+                        leadingIcon: SizedBox(
+                          width: 18,
+                          child: item.value == widget.value
+                              ? Icon(Icons.check_rounded, size: 18, color: theme.colorScheme.primary)
+                              : null,
+                        ),
+                        child: item.child,
+                      ),
+                  ]),
                 ),
               ),
-              const SizedBox(width: 6),
-              AnimatedRotation(
-                turns: controller.isOpen ? 0.5 : 0,
-                duration: const Duration(milliseconds: 150),
-                child: Icon(Icons.expand_more_rounded, size: 20, color: scheme.onSurfaceVariant),
-              ),
-            ]),
+            ),
           ),
         ),
       ),
@@ -499,3 +582,6 @@ String formatBytes(int bytes) {
 }
 
 String get appVersionLabel => 'v$kAppVersion';
+
+/// Opens [url] in the system browser (downloads go through the browser too).
+Future<void> openUrl(String url) => launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);

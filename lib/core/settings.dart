@@ -21,12 +21,9 @@ class Hotkey {
   final String key;
   final bool ctrl, alt, shift, meta;
 
-  static const keys = [
-    'RightCtrl', 'RightAlt', 'RightShift', 'CapsLock', 'ScrollLock', 'Pause',
-    'Insert', 'Space', 'Backquote',
-    'F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12',
-  ];
-
+  /// [key] is a name the native hotkey code understands: RightCtrl,
+  /// RightAlt, RightShift, CapsLock, ScrollLock, Pause, Insert, Space,
+  /// Backquote, F1..F24, A..Z or 0..9 (see HotkeyRecorder).
   static const keyLabels = {
     'RightCtrl': '右 Ctrl',
     'RightAlt': '右 Alt',
@@ -93,7 +90,18 @@ class Settings extends ChangeNotifier {
   /// Recording pill: 'center' | 'top' | 'bottom', and window opacity.
   String pillPosition = 'center';
   double pillOpacity = 0.8;
+  /// Start in the tray when opened manually (sign-in autostart always does).
   bool startHidden = false;
+  bool autoCheckUpdates = true;
+
+  /// App version of the previous launch ('' before the first one).
+  String lastRunVersion = '';
+
+  /// No saved settings yet: this is the first launch.
+  bool firstRun = false;
+
+  /// Bumped when a stored value must be migrated once.
+  static const _prefsVersion = 2;
   bool bubbleEnabled = false;
 
   static int get defaultThreads =>
@@ -102,7 +110,10 @@ class Settings extends ChangeNotifier {
   Future<void> load() async {
     _prefs = await SharedPreferences.getInstance();
     final raw = _prefs.getString(_key);
-    if (raw == null) return;
+    if (raw == null) {
+      firstRun = true;
+      return;
+    }
     try {
       final m = jsonDecode(raw) as Map<String, dynamic>;
       modelId = m['modelId'] as String? ?? modelId;
@@ -126,6 +137,11 @@ class Settings extends ChangeNotifier {
       pillPosition = m['pillPosition'] as String? ?? pillPosition;
       pillOpacity = (m['pillOpacity'] as num?)?.toDouble() ?? pillOpacity;
       startHidden = m['startHidden'] as bool? ?? startHidden;
+      autoCheckUpdates = m['autoCheckUpdates'] as bool? ?? autoCheckUpdates;
+      lastRunVersion = m['lastRunVersion'] as String? ?? '';
+      // v1 "start hidden" also covered sign-in autostart and was easy to turn
+      // on by accident; it now only means "hide when opened manually".
+      if ((m['prefsVersion'] as int? ?? 1) < 2) startHidden = false;
       bubbleEnabled = m['bubbleEnabled'] as bool? ?? bubbleEnabled;
     } catch (_) {
       // Corrupt or older settings: keep defaults.
@@ -160,6 +176,9 @@ class Settings extends ChangeNotifier {
         'pillPosition': pillPosition,
         'pillOpacity': pillOpacity,
         'startHidden': startHidden,
+        'autoCheckUpdates': autoCheckUpdates,
+        'lastRunVersion': lastRunVersion,
+        'prefsVersion': _prefsVersion,
         'bubbleEnabled': bubbleEnabled,
       };
 }

@@ -67,6 +67,11 @@ class NativeBridge {
   Future<void> exitPill() => _call('exitPill', {'minWidth': 760, 'minHeight': 540});
 
   /// Whether the main window is currently visible and focused.
+  /// Colours the native title bar like the page (Windows 11) and picks its
+  /// light/dark variant from the app theme instead of the system theme.
+  Future<void> setTitleBar(int argb, {required bool dark}) =>
+      _call('setTitleBar', {'color': argb, 'dark': dark});
+
   Future<bool> isWindowActive() async => await _call<bool>('isWindowActive') ?? false;
 
   // Android -----------------------------------------------------------------
