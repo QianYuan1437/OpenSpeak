@@ -108,9 +108,18 @@ class GpuManager extends ChangeNotifier {
     _cancel = false;
     error = null;
     final tmp = Directory(p.join(packDir.parent.path, 'gpu-download'));
+    RandomAccessFile? lock;
     try {
       await packDir.create(recursive: true);
       await tmp.create(recursive: true);
+      // Two processes extracting into the same folder corrupt each other's
+      // files, so only one may install at a time.
+      lock = await File(p.join(tmp.path, '.lock')).open(mode: FileMode.write);
+      try {
+        await lock.lock(FileLock.exclusive);
+      } on FileSystemException {
+        throw Exception('另一个 OpenSpeak 进程正在安装加速包 / Another OpenSpeak process is installing the GPU pack');
+      }
       final marker = File(p.join(packDir.path, '.complete'));
       if (await marker.exists()) await marker.delete();
 
@@ -165,6 +174,7 @@ class GpuManager extends ChangeNotifier {
     } catch (e) {
       error = '$e';
     } finally {
+      await lock?.close();
       progress = null;
       notifyListeners();
     }
@@ -228,6 +238,7 @@ class GpuManager extends ChangeNotifier {
           final os = OutputFileStream(dest);
           f.writeContent(os);
           await os.close();
+          if (File(dest).lengthSync() != f.size) throw Exception('incomplete extract: ${f.name}');
         }
       } finally {
         await input.close();
