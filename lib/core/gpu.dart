@@ -132,7 +132,7 @@ class GpuManager extends ChangeNotifier {
           [Uri.parse('$_repo/releases/download/gpu-runtime-$sherpaVersion/$runtime')],
           null,
           runtime,
-          (file) => _extract(file, (name) => !name.endsWith('/'), flatten: true),
+          (file) => extractLibraries(file, packDir.path),
         ));
       }
       for (final w in _wheels) {
@@ -141,8 +141,7 @@ class GpuManager extends ChangeNotifier {
           urls,
           hash,
           Uri.decodeComponent(p.basename(urls.first.path)),
-          (file) => _extract(file, (name) => name.startsWith(w.dir) && w.pattern.hasMatch(name),
-              flatten: true),
+          (file) => extractLibraries(file, packDir.path, dir: w.dir, pattern: w.pattern.pattern),
         ));
       }
       final sizes = <int>[];
@@ -226,15 +225,23 @@ class GpuManager extends ChangeNotifier {
     return a.length - b.length;
   }
 
-  Future<void> _extract(String file, bool Function(String name) want, {bool flatten = false}) async {
-    final out = packDir.path;
-    await Isolate.run(() async {
+  /// Extracts the files of the zip [file] that sit under [dir] and match
+  /// [pattern] (all files when null) flat into [out], on a background
+  /// isolate. Static with plain arguments on purpose: a closure created in an
+  /// instance method can drag `this` (and the UI listeners attached to it)
+  /// into the isolate message, which fails as "object is unsendable".
+  @visibleForTesting
+  static Future<void> extractLibraries(String file, String out, {String? dir, String? pattern}) {
+    return Isolate.run(() async {
+      final re = pattern == null ? null : RegExp(pattern);
       final input = InputFileStream(file);
       try {
         final zip = ZipDecoder().decodeStream(input);
         for (final f in zip.files) {
-          if (!f.isFile || !want(f.name)) continue;
-          final dest = p.join(out, flatten ? p.basename(f.name) : f.name);
+          if (!f.isFile) continue;
+          if (dir != null && !f.name.startsWith(dir)) continue;
+          if (re != null && !re.hasMatch(f.name)) continue;
+          final dest = p.join(out, p.basename(f.name));
           final os = OutputFileStream(dest);
           f.writeContent(os);
           await os.close();
