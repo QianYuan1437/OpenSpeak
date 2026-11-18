@@ -145,10 +145,13 @@ class GpuManager extends ChangeNotifier {
       for (var i = 0; i < jobs.length; i++) {
         final (urls, hash, name, extract) = jobs[i];
         final dest = File(p.join(tmp.path, name));
-        await _fetchAny(urls, dest, (host, got) {
-          progress = DownloadProgress(done + got, total, 'download', source: host);
-          notifyListeners();
-        });
+        // A finished download from an interrupted install is reused.
+        if (!await dest.exists() || await dest.length() != sizes[i]) {
+          await _fetchAny(urls, dest, (host, got) {
+            progress = DownloadProgress(done + got, total, 'download', source: host);
+            notifyListeners();
+          });
+        }
         if (hash != null) await _verify(dest, hash);
         progress = DownloadProgress(done + sizes[i], total, 'extract', source: name);
         notifyListeners();

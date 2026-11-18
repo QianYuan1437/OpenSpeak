@@ -42,7 +42,7 @@
 | 平台 | 文件 |
 |---|---|
 | Windows 10/11 x64 | `OpenSpeak-x.y.z-windows-x64-setup.exe`（安装版）或 `…-windows-x64.zip`（绿色版） |
-| Linux x64（X11） | `OpenSpeak-x.y.z-linux-amd64.deb` 或 `…-linux-x64.tar.gz` |
+| Linux x64（Ubuntu 24.04+，X11） | `OpenSpeak-x.y.z-linux-amd64.deb` 或 `…-linux-x64.tar.gz` |
 | Android 7.0+ | `OpenSpeak-x.y.z-android-arm64-v8a.apk`（绝大多数手机） |
 
 首次启动后在“模型”页一键下载模型（HuggingFace → hf-mirror → GitHub 自动切换）。
