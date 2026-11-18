@@ -53,7 +53,8 @@ class ModelSpec {
   final bool punctuation;
 
   /// Peak GPU memory (MiB) when run with CUDA, CUDA runtime included;
-  /// measured with sherpa-onnx 2.0.1 on an RTX 3090 (+ ~10 % headroom).
+  /// measured with sherpa-onnx 2.0.1 on an RTX 3090 (+ ~10 % headroom)
+  /// unless noted.
   final int vramMB;
 
   String get archive => '$dir.tar.bz2';
@@ -84,7 +85,7 @@ const kModels = <ModelSpec>[
     files: {'model': 'model.onnx', 'tokens': 'tokens.txt'},
     gpuRecommended: true,
     mobile: false,
-    vramMB: 0,
+    vramMB: 1450, // estimated: ~0.9 GB fp32 weights + CUDA runtime + activations
   ),
   ModelSpec(
     id: 'paraformer-zh-small',
