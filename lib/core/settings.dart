@@ -77,10 +77,14 @@ class Settings extends ChangeNotifier {
   Hotkey hotkey = const Hotkey('RightCtrl');
   OutputMode output = OutputMode.type;
   bool stripTrailingPeriod = false;
+  bool toSimplified = true;
   String language = 'auto';
   bool useGpu = false;
   int threads = defaultThreads;
   ThemeMode themeMode = ThemeMode.system;
+
+  /// ARGB seed of the accent colour (see kAccentPresets).
+  int accent = 0xFF5B5BD6;
 
   /// 'system', 'zh' or 'en'.
   String uiLanguage = 'system';
@@ -107,10 +111,12 @@ class Settings extends ChangeNotifier {
       if (m['hotkey'] is Map) hotkey = Hotkey.fromJson(m['hotkey'] as Map);
       output = OutputMode.values.byName(m['output'] as String? ?? 'type');
       stripTrailingPeriod = m['stripTrailingPeriod'] as bool? ?? false;
+      toSimplified = m['toSimplified'] as bool? ?? true;
       language = m['language'] as String? ?? language;
       useGpu = m['useGpu'] as bool? ?? false;
       threads = m['threads'] as int? ?? threads;
       themeMode = ThemeMode.values.byName(m['themeMode'] as String? ?? 'system');
+      accent = m['accent'] as int? ?? accent;
       uiLanguage = m['uiLanguage'] as String? ?? uiLanguage;
       soundCue = m['soundCue'] as bool? ?? soundCue;
       startHidden = m['startHidden'] as bool? ?? startHidden;
@@ -137,10 +143,12 @@ class Settings extends ChangeNotifier {
         'hotkey': hotkey.toJson(),
         'output': output.name,
         'stripTrailingPeriod': stripTrailingPeriod,
+        'toSimplified': toSimplified,
         'language': language,
         'useGpu': useGpu,
         'threads': threads,
         'themeMode': themeMode.name,
+        'accent': accent,
         'uiLanguage': uiLanguage,
         'soundCue': soundCue,
         'startHidden': startHidden,

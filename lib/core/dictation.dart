@@ -111,7 +111,10 @@ class Dictation extends ChangeNotifier {
   Future<void> ensureModel({bool force = false}) async {
     final spec = currentModel;
     if (spec == null || !models.isInstalled(spec)) return;
-    final provider = settings.useGpu && gpu.ready ? 'cuda' : 'cpu';
+    var provider = settings.useGpu && gpu.ready ? 'cuda' : 'cpu';
+    // The CPU and CUDA builds share DLL names; once the CPU one is loaded the
+    // GPU build only takes effect after a restart.
+    if (provider == 'cuda' && GpuManager.cpuLibLoaded) provider = 'cpu';
     if (!force &&
         engine.isLoaded &&
         loadedModelId == spec.id &&
@@ -136,6 +139,7 @@ class Dictation extends ChangeNotifier {
       ));
       loadedModelId = spec.id;
       loadedProvider = provider;
+      if (provider == 'cpu') GpuManager.cpuLibLoaded = true;
       state = DictationState.idle;
     } catch (e) {
       loadedModelId = null;
@@ -274,7 +278,7 @@ class Dictation extends ChangeNotifier {
     segments.clear();
     partial = '';
     error = null;
-    engine.begin();
+    engine.begin(autoGain: settings.autoGain);
     try {
       await capture.start(
         device: activeDevice,
@@ -316,7 +320,8 @@ class Dictation extends ChangeNotifier {
 
   Future<void> _onFinal(AsrFinal fin) async {
     if (state != DictationState.processing) return;
-    final text = postProcess(fin.text, stripTrailingPeriod: settings.stripTrailingPeriod);
+    final text = postProcess(fin.text,
+        stripTrailingPeriod: settings.stripTrailingPeriod, toSimplified: settings.toSimplified);
     segments.clear();
     partial = '';
     state = DictationState.idle;

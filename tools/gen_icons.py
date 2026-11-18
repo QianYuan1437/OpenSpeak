@@ -69,7 +69,7 @@ def save(img, *parts):
 
 icon = app_icon()
 save(icon, 'assets', 'icon.png')
-save(icon.resize((512, 512), Image.LANCZOS), 'docs', 'public', 'icon.png')
+save(icon.resize((512, 512), Image.LANCZOS), 'docs', 'assets', 'icon.png')
 save(icon.resize((256, 256), Image.LANCZOS), 'linux', 'runner', 'openspeak.png')
 icon.save(os.path.join(ROOT, 'windows', 'runner', 'resources', 'app_icon.ico'),
           sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])

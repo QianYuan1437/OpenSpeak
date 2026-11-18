@@ -20,21 +20,28 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "io.github.qianyuan1437.openspeak"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
 
+    // Community builds are signed with the keystore committed to the repo so
+    // CI and local release APKs can update each other. Override with
+    // OPENSPEAK_KEYSTORE / OPENSPEAK_KEYSTORE_PASSWORD for private builds.
+    signingConfigs {
+        create("release") {
+            storeFile = file(System.getenv("OPENSPEAK_KEYSTORE") ?: "openspeak-release.jks")
+            storePassword = System.getenv("OPENSPEAK_KEYSTORE_PASSWORD") ?: "openspeak"
+            keyAlias = System.getenv("OPENSPEAK_KEY_ALIAS") ?: "openspeak"
+            keyPassword = System.getenv("OPENSPEAK_KEY_PASSWORD") ?: "openspeak"
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 }

@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 
 import 'native_bridge.dart';
 import 'settings.dart';
+import 't2s_table.dart';
 
 /// Result of delivering text to the focused application.
 enum OutputResult { typed, pasted, copied, failed }
@@ -70,11 +71,31 @@ class TextOutput {
 }
 
 /// Light post-processing applied before output.
-String postProcess(String text, {required bool stripTrailingPeriod}) {
-  var t = text.trim();
+String postProcess(String text,
+    {required bool stripTrailingPeriod, bool toSimplified = false}) {
+  var t = text.trim().replaceAll(RegExp(r' {2,}'), ' ');
+  if (toSimplified) t = traditionalToSimplified(t);
   if (stripTrailingPeriod && t.isNotEmpty) {
     final last = t[t.length - 1];
     if (last == '。' || last == '.') t = t.substring(0, t.length - 1);
   }
   return t;
+}
+
+Map<int, int>? _t2s;
+final _kana = RegExp(r'[\u3040-\u30ff]');
+
+/// Character-level Traditional→Simplified Chinese conversion (OpenCC table).
+/// Japanese text (anything containing kana) is left untouched.
+String traditionalToSimplified(String text) {
+  if (_kana.hasMatch(text)) return text;
+  final map = _t2s ??= () {
+    final m = <int, int>{};
+    final runes = kT2SPairs.runes.toList();
+    for (var i = 0; i + 1 < runes.length; i += 2) {
+      m[runes[i]] = runes[i + 1];
+    }
+    return m;
+  }();
+  return String.fromCharCodes(text.runes.map((r) => map[r] ?? r));
 }

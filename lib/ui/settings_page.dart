@@ -93,10 +93,9 @@ class _SettingsPageState extends State<SettingsPage> {
         onPressed: dictation.refreshDevices,
       ),
       children: [
-        DropdownButtonFormField<String?>(
-          initialValue: value,
-          isExpanded: true,
-          decoration: InputDecoration(labelText: t('输入设备', 'Input device')),
+        OsDropdown<String?>(
+          value: value,
+          label: t('输入设备', 'Input device'),
           items: [
             DropdownMenuItem(
               value: null,
@@ -231,9 +230,9 @@ class _SettingsPageState extends State<SettingsPage> {
         Row(children: [
           SizedBox(
             width: 180,
-            child: DropdownButtonFormField<String>(
-              initialValue: h.key,
-              decoration: InputDecoration(labelText: t('按键', 'Key')),
+            child: OsDropdown<String>(
+              value: h.key,
+              label: t('按键', 'Key'),
               items: [
                 for (final k in Hotkey.keys)
                   DropdownMenuItem(value: k, child: Text(Hotkey.keyLabels[k] ?? k)),
@@ -310,15 +309,22 @@ class _SettingsPageState extends State<SettingsPage> {
       icon: Icons.translate_rounded,
       children: [
         if (spec?.id.startsWith('sense-voice') ?? false)
-          DropdownButtonFormField<String>(
-            initialValue: settings.language,
-            decoration: InputDecoration(labelText: t('语言', 'Language')),
+          OsDropdown<String>(
+            value: settings.language,
+            label: t('语言', 'Language'),
             items: [for (final e in langs.entries) DropdownMenuItem(value: e.key, child: Text(e.value))],
             onChanged: (v) async {
               await settings.update((s) => s.language = v ?? 'auto');
               await dictation.ensureModel(force: true);
             },
           ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: Text(t('繁体转简体', 'Convert Traditional to Simplified Chinese')),
+          subtitle: Text(t('部分模型（如 Qwen3）可能输出繁体字', 'Some models (e.g. Qwen3) may output Traditional characters')),
+          value: settings.toSimplified,
+          onChanged: (v) => settings.update((s) => s.toSimplified = v),
+        ),
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
           title: Text(t('去掉句末句号', 'Drop trailing period')),
@@ -353,6 +359,35 @@ class _SettingsPageState extends State<SettingsPage> {
       title: t('外观与启动', 'Appearance & startup'),
       icon: Icons.palette_outlined,
       children: [
+        Text(t('主题色', 'Accent color'), style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+        const SizedBox(height: 8),
+        Wrap(spacing: 10, runSpacing: 10, children: [
+          for (final (argb, zh, en) in kAccentPresets)
+            Tooltip(
+              message: t(zh, en),
+              child: InkWell(
+                customBorder: const CircleBorder(),
+                onTap: () => settings.update((s) => s.accent = argb),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 150),
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    color: Color(argb),
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: settings.accent == argb ? Theme.of(context).colorScheme.onSurface : Colors.transparent,
+                      width: 2.5,
+                    ),
+                  ),
+                  child: settings.accent == argb
+                      ? const Icon(Icons.check_rounded, color: Colors.white, size: 18)
+                      : null,
+                ),
+              ),
+            ),
+        ]),
+        const SizedBox(height: 16),
         Wrap(spacing: 16, runSpacing: 12, crossAxisAlignment: WrapCrossAlignment.center, children: [
           SegmentedButton<ThemeMode>(
             segments: [

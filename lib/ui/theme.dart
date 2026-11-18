@@ -1,25 +1,63 @@
 import 'package:flutter/material.dart';
 
-const kBrand = Color(0xFF5B5BD6);
 const kListening = Color(0xFFE5484D);
 const kProcessing = Color(0xFFF5A524);
 
-ThemeData buildTheme(Brightness b) {
-  final scheme = ColorScheme.fromSeed(seedColor: kBrand, brightness: b);
+/// Accent presets offered in Settings (value = ARGB seed).
+const kAccentPresets = <(int, String, String)>[
+  (0xFF5B5BD6, '靛紫', 'Indigo'),
+  (0xFF2563EB, '海蓝', 'Blue'),
+  (0xFF0891B2, '湖青', 'Cyan'),
+  (0xFF0D9488, '青绿', 'Teal'),
+  (0xFF16A34A, '翠绿', 'Green'),
+  (0xFFD97706, '琥珀', 'Amber'),
+  (0xFFE11D48, '珊瑚', 'Rose'),
+  (0xFF9333EA, '紫罗兰', 'Violet'),
+];
+
+const kDefaultAccent = 0xFF5B5BD6;
+
+/// Shared corner radii so every control has the same rounded look.
+const kRadius = 14.0;
+const kCardRadius = 18.0;
+final kControlShape = RoundedRectangleBorder(borderRadius: BorderRadius.circular(kRadius));
+
+ThemeData buildTheme(Brightness b, {int accent = kDefaultAccent}) {
+  final scheme = ColorScheme.fromSeed(seedColor: Color(accent), brightness: b);
   final dark = b == Brightness.dark;
+  final background = Color.alphaBlend(
+    scheme.primary.withValues(alpha: dark ? 0.04 : 0.025),
+    dark ? const Color(0xFF111118) : const Color(0xFFF7F7FB),
+  );
+  final surface = dark ? Color.alphaBlend(scheme.primary.withValues(alpha: 0.05), const Color(0xFF1B1B24)) : Colors.white;
+  final fieldFill = scheme.surfaceContainerHighest.withValues(alpha: dark ? 0.45 : 0.55);
+  final outline = scheme.outlineVariant.withValues(alpha: dark ? 0.35 : 0.6);
+  final menuStyle = MenuStyle(
+    backgroundColor: WidgetStatePropertyAll(surface),
+    surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
+    elevation: const WidgetStatePropertyAll(6),
+    shape: WidgetStatePropertyAll(kControlShape),
+    padding: const WidgetStatePropertyAll(EdgeInsets.symmetric(vertical: 6)),
+  );
+
   return ThemeData(
     useMaterial3: true,
     colorScheme: scheme,
     brightness: b,
-    scaffoldBackgroundColor: dark ? const Color(0xFF111118) : const Color(0xFFF7F7FB),
+    scaffoldBackgroundColor: background,
+    canvasColor: surface,
+    focusColor: scheme.primaryContainer.withValues(alpha: dark ? 0.35 : 0.55),
+    hoverColor: scheme.primary.withValues(alpha: 0.06),
+    highlightColor: scheme.primary.withValues(alpha: 0.08),
+    splashColor: scheme.primary.withValues(alpha: 0.10),
     fontFamilyFallback: const ['Microsoft YaHei UI', 'PingFang SC', 'Noto Sans CJK SC', 'Noto Sans SC'],
     cardTheme: CardThemeData(
       elevation: 0,
       margin: EdgeInsets.zero,
-      color: dark ? const Color(0xFF1B1B24) : Colors.white,
+      color: surface,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(18),
-        side: BorderSide(color: scheme.outlineVariant.withValues(alpha: dark ? 0.35 : 0.6)),
+        borderRadius: BorderRadius.circular(kCardRadius),
+        side: BorderSide(color: outline),
       ),
     ),
     navigationRailTheme: NavigationRailThemeData(
@@ -27,16 +65,70 @@ ThemeData buildTheme(Brightness b) {
       indicatorColor: scheme.primaryContainer,
       labelType: NavigationRailLabelType.all,
     ),
+    navigationBarTheme: NavigationBarThemeData(
+      backgroundColor: surface,
+      indicatorColor: scheme.primaryContainer,
+    ),
     inputDecorationTheme: InputDecorationTheme(
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+      filled: true,
+      fillColor: fieldFill,
       isDense: true,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(kRadius), borderSide: BorderSide.none),
+      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(kRadius), borderSide: BorderSide.none),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(kRadius),
+        borderSide: BorderSide(color: scheme.primary, width: 1.6),
+      ),
+    ),
+    dropdownMenuTheme: DropdownMenuThemeData(menuStyle: menuStyle),
+    menuTheme: MenuThemeData(style: menuStyle),
+    popupMenuTheme: PopupMenuThemeData(
+      color: surface,
+      surfaceTintColor: Colors.transparent,
+      elevation: 6,
+      shape: kControlShape,
+    ),
+    dialogTheme: DialogThemeData(
+      backgroundColor: surface,
+      surfaceTintColor: Colors.transparent,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(kCardRadius + 4)),
     ),
     segmentedButtonTheme: SegmentedButtonThemeData(
-      style: ButtonStyle(visualDensity: VisualDensity.compact),
+      style: ButtonStyle(
+        visualDensity: VisualDensity.compact,
+        shape: WidgetStatePropertyAll(kControlShape),
+        side: WidgetStatePropertyAll(BorderSide(color: outline)),
+      ),
     ),
-    snackBarTheme: const SnackBarThemeData(behavior: SnackBarBehavior.floating),
-    listTileTheme: const ListTileThemeData(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
+    chipTheme: ChipThemeData(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      side: BorderSide(color: outline),
+    ),
+    filledButtonTheme: FilledButtonThemeData(style: FilledButton.styleFrom(shape: kControlShape)),
+    outlinedButtonTheme: OutlinedButtonThemeData(
+      style: OutlinedButton.styleFrom(shape: kControlShape, side: BorderSide(color: outline)),
+    ),
+    textButtonTheme: TextButtonThemeData(style: TextButton.styleFrom(shape: kControlShape)),
+    snackBarTheme: SnackBarThemeData(
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(kRadius)),
+    ),
+    tooltipTheme: TooltipThemeData(
+      decoration: BoxDecoration(
+        color: dark ? const Color(0xFF2A2A36) : const Color(0xFF30303A),
+        borderRadius: BorderRadius.circular(8),
+      ),
+    ),
+    listTileTheme: ListTileThemeData(shape: kControlShape),
+    sliderTheme: SliderThemeData(
+      tickMarkShape: SliderTickMarkShape.noTickMark,
+      showValueIndicator: ShowValueIndicator.onDrag,
+    ),
+    switchTheme: SwitchThemeData(
+      thumbIcon: WidgetStateProperty.resolveWith(
+        (s) => s.contains(WidgetState.selected) ? const Icon(Icons.check_rounded, size: 14) : null,
+      ),
     ),
   );
 }

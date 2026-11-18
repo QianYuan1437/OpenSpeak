@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">OpenSpeak</string>
+    <string name="bubble_channel">悬浮按钮</string>
+    <string name="bubble_title">OpenSpeak 悬浮按钮运行中</string>
+    <string name="bubble_text">点击悬浮球说话，结果自动复制到剪贴板</string>
+    <string name="bubble_copied">已复制到剪贴板</string>
+    <string name="a11y_description">开启后，OpenSpeak 会把语音识别结果直接写入当前获得焦点的输入框。OpenSpeak 不会读取或上传屏幕内容，所有识别均在本机离线完成。</string>
+</resources>

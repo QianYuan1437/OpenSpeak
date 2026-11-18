@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OpenSpeak — 离线语音输入 · Offline voice typing</title>
+  <meta name="description" content="OpenSpeak: open-source, offline, cross-platform voice typing for Windows, Linux and Android. 开源离线跨平台语音输入。">
+  <link rel="icon" href="assets/icon.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="nav">
+    <a class="brand" href="#"><img src="assets/icon.png" alt=""> OpenSpeak</a>
+    <nav>
+      <a href="#features" data-zh="功能" data-en="Features">功能</a>
+      <a href="#mics" data-zh="麦克风" data-en="Mics">麦克风</a>
+      <a href="#download" data-zh="下载" data-en="Download">下载</a>
+      <a href="https://github.com/QianYuan1437/OpenSpeak">GitHub</a>
+      <button id="lang" aria-label="language">EN</button>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <img class="hero-icon" src="assets/icon.png" alt="OpenSpeak">
+      <h1 data-zh="按住说话，松开即输入" data-en="Hold to talk. Release to type.">按住说话，松开即输入</h1>
+      <p class="lead" data-zh="开源、完全离线的语音输入工具。在任何应用里按住快捷键说话，文字直接出现在光标处。支持 Windows、Linux 与 Android。"
+         data-en="Open-source, fully offline voice typing. Hold a hotkey in any app, speak, and the text appears at your cursor. Windows, Linux and Android.">
+        开源、完全离线的语音输入工具。在任何应用里按住快捷键说话，文字直接出现在光标处。支持 Windows、Linux 与 Android。</p>
+      <div class="cta">
+        <a class="btn primary" href="#download" data-zh="免费下载" data-en="Download free">免费下载</a>
+        <a class="btn" href="https://github.com/QianYuan1437/OpenSpeak" data-zh="查看源码" data-en="View source">查看源码</a>
+      </div>
+      <p class="version" id="version"></p>
+      <div class="shots">
+        <img src="assets/screen-home.png" alt="OpenSpeak main window">
+        <img class="pill" src="assets/screen-pill.png" alt="Recording pill">
+      </div>
+    </section>
+
+    <section id="features" class="grid">
+      <article>
+        <span class="ico">🔒</span>
+        <h3 data-zh="完全离线" data-en="Fully offline">完全离线</h3>
+        <p data-zh="基于 sherpa-onnx 在本机识别，音频从不离开你的电脑或手机。" data-en="Recognition runs locally with sherpa-onnx; audio never leaves your device.">基于 sherpa-onnx 在本机识别，音频从不离开你的电脑或手机。</p>
+      </article>
+      <article>
+        <span class="ico">⚡</span>
+        <h3 data-zh="快" data-en="Fast">快</h3>
+        <p data-zh="SenseVoice 在普通 CPU 上 5 秒语音约 0.1 秒出字；NVIDIA 显卡可一键开启 CUDA 加速大模型。" data-en="SenseVoice transcribes 5 s of speech in ~0.1 s on a CPU; one click enables CUDA for larger models.">SenseVoice 在普通 CPU 上 5 秒语音约 0.1 秒出字；NVIDIA 显卡可一键开启 CUDA 加速大模型。</p>
+      </article>
+      <article>
+        <span class="ico">⌨️</span>
+        <h3 data-zh="任何应用都能用" data-en="Works everywhere">任何应用都能用</h3>
+        <p data-zh="按住右 Ctrl 说话（可自定义），松开后逐字键入当前窗口；也支持“按一下开始/结束”。" data-en="Hold Right Ctrl (configurable) and release to type into the focused window — or press to toggle.">按住右 Ctrl 说话（可自定义），松开后逐字键入当前窗口；也支持“按一下开始/结束”。</p>
+      </article>
+      <article>
+        <span class="ico">🌏</span>
+        <h3 data-zh="多语种" data-en="Multilingual">多语种</h3>
+        <p data-zh="中文、英文、日语、韩语、粤语自动识别，自带标点与数字规整，可选繁转简。" data-en="Chinese, English, Japanese, Korean and Cantonese with punctuation and number formatting.">中文、英文、日语、韩语、粤语自动识别，自带标点与数字规整，可选繁转简。</p>
+      </article>
+      <article>
+        <span class="ico">📱</span>
+        <h3 data-zh="Android 悬浮球" data-en="Android bubble">Android 悬浮球</h3>
+        <p data-zh="在任意 App 上方点按或长按悬浮球说话，结果自动复制或直接写入输入框。" data-en="Tap or hold a floating mic over any app; results are copied or inserted directly.">在任意 App 上方点按或长按悬浮球说话，结果自动复制或直接写入输入框。</p>
+      </article>
+      <article>
+        <span class="ico">🎨</span>
+        <h3 data-zh="简洁好看" data-en="Clean design">简洁好看</h3>
+        <p data-zh="深浅色模式、8 种主题色、中英文界面，常驻托盘，占用小。" data-en="Light/dark, 8 accent colours, bilingual UI, lives quietly in the tray.">深浅色模式、8 种主题色、中英文界面，常驻托盘，占用小。</p>
+      </article>
+    </section>
+
+    <section id="mics" class="band">
+      <h2 data-zh="为创作者麦克风调校" data-en="Tuned for creator microphones">为创作者麦克风调校</h2>
+      <p data-zh="插入接收器即自动识别并切换；双发射器可按左/右声道（TX1 / TX2）分别拾音，内置自动增益让领夹麦也清晰可辨。"
+         data-en="Plug in a receiver and OpenSpeak switches to it. Pick TX1/TX2 via left/right channel on dual kits; built-in auto gain keeps lavalier mics clear.">
+        插入接收器即自动识别并切换；双发射器可按左/右声道（TX1 / TX2）分别拾音，内置自动增益让领夹麦也清晰可辨。</p>
+      <div class="chips">
+        <span>DJI Mic 2 / Mic Mini</span><span>Godox MoveLink / Virso</span><span>Insta360 Mic Air</span>
+        <span>RØDE Wireless GO / PRO</span><span>Hollyland Lark</span><span>Saramonic Blink</span><span>BOYA</span><span>Shure MV7</span>
+      </div>
+    </section>
+
+    <section id="models">
+      <h2 data-zh="可选模型" data-en="Models">可选模型</h2>
+      <table>
+        <thead><tr><th data-zh="模型" data-en="Model">模型</th><th data-zh="大小" data-en="Size">大小</th><th data-zh="特点" data-en="Notes">特点</th></tr></thead>
+        <tbody>
+          <tr><td>SenseVoice Small</td><td>228 MB</td><td data-zh="默认；中英日韩粤，带标点，CPU 即可" data-en="Default; zh/en/ja/ko/yue, punctuated, CPU-friendly">默认；中英日韩粤，带标点，CPU 即可</td></tr>
+          <tr><td>Paraformer 中文 Small</td><td>79 MB</td><td data-zh="超轻量，适合低配手机" data-en="Tiny, for low-end phones">超轻量，适合低配手机</td></tr>
+          <tr><td>FireRed-ASR2 CTC</td><td>496 MB</td><td data-zh="中英文高精度，建议 GPU" data-en="High-accuracy zh/en, GPU recommended">中英文高精度，建议 GPU</td></tr>
+          <tr><td>Qwen3-ASR 0.6B</td><td>837 MB</td><td data-zh="语音大模型，多语种，建议 GPU" data-en="Speech LLM, multilingual, GPU recommended">语音大模型，多语种，建议 GPU</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="download" class="band">
+      <h2 data-zh="下载" data-en="Download">下载</h2>
+      <div class="downloads">
+        <a class="dl" data-asset="windows-x64-setup.exe" href="https://github.com/QianYuan1437/OpenSpeak/releases/latest">
+          <strong>Windows</strong><span data-zh="10 / 11 x64 安装包" data-en="10 / 11 x64 installer">10 / 11 x64 安装包</span></a>
+        <a class="dl" data-asset="linux-amd64.deb" href="https://github.com/QianYuan1437/OpenSpeak/releases/latest">
+          <strong>Linux</strong><span data-zh=".deb（Ubuntu / Debian，X11）" data-en=".deb (Ubuntu / Debian, X11)">.deb（Ubuntu / Debian，X11）</span></a>
+        <a class="dl" data-asset="android-arm64-v8a.apk" href="https://github.com/QianYuan1437/OpenSpeak/releases/latest">
+          <strong>Android</strong><span data-zh="7.0+ arm64 APK" data-en="7.0+ arm64 APK">7.0+ arm64 APK</span></a>
+      </div>
+      <p class="muted"><a href="https://github.com/QianYuan1437/OpenSpeak/releases" data-zh="全部版本与绿色版 →" data-en="All releases & portable builds →">全部版本与绿色版 →</a></p>
+    </section>
+  </main>
+
+  <footer>
+    <p>MIT © QianYuan1437 · <span data-zh="识别引擎" data-en="Engine">识别引擎</span> <a href="https://github.com/k2-fsa/sherpa-onnx">sherpa-onnx</a></p>
+  </footer>
+
+  <script>
+    const btn = document.getElementById('lang');
+    function apply(lang) {
+      document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
+      document.querySelectorAll('[data-zh]').forEach(el => { el.textContent = el.dataset[lang]; });
+      btn.textContent = lang === 'zh' ? 'EN' : '中文';
+      localStorage.setItem('lang', lang);
+    }
+    apply(localStorage.getItem('lang') || (navigator.language.startsWith('zh') ? 'zh' : 'en'));
+    btn.onclick = () => apply(document.documentElement.lang === 'en' ? 'zh' : 'en');
+
+    // Point download buttons straight at the newest release assets.
+    fetch('https://api.github.com/repos/QianYuan1437/OpenSpeak/releases?per_page=10')
+      .then(r => r.ok ? r.json() : [])
+      .then(list => {
+        const rel = list.find(r => !r.draft && !r.prerelease) || list.find(r => !r.draft);
+        if (!rel) return;
+        document.getElementById('version').textContent = rel.tag_name === 'latest' ? rel.name : 'OpenSpeak ' + rel.tag_name;
+        document.querySelectorAll('.dl').forEach(a => {
+          const asset = rel.assets.find(x => x.name.endsWith(a.dataset.asset));
+          if (asset) a.href = asset.browser_download_url;
+        });
+      })
+      .catch(() => {});
+  </script>
+</body>
+</html>

@@ -10,7 +10,7 @@ import 'asr_engine.dart' show kSampleRate;
 enum ChannelMode { mix, left, right }
 
 /// Captures 16 kHz float audio from the selected input with optional
-/// left/right channel pick (dual-TX wireless kits), manual gain and AGC.
+/// left/right channel pick (dual-TX wireless kits) and manual gain.
 class AudioCapture {
   AudioRecorder _rec = AudioRecorder();
   StreamSubscription<Uint8List>? _sub;
@@ -21,7 +21,6 @@ class AudioCapture {
   ChannelMode _mode = ChannelMode.mix;
   double _gain = 1;
   bool _agc = true;
-  double _agcGain = 1;
   double _env = 0;
 
   /// 0..1 loudness for meters, emitted ~10×/s.
@@ -49,7 +48,6 @@ class AudioCapture {
     _mode = channel;
     _gain = math.pow(10, gainDb / 20).toDouble();
     _agc = agc;
-    _agcGain = 1;
     _env = 0;
     _carry.clear();
     // Mono lets the OS downmix; stereo only when a single side is wanted.
@@ -137,36 +135,25 @@ class AudioCapture {
     return out;
   }
 
-  /// Manual gain, then a slow-attack AGC that lifts quiet lavalier/wireless
-  /// receivers toward a comfortable level without pumping on silence.
+  /// Applies the manual gain to the samples. Auto gain is done per segment by
+  /// the recognizer (a running AGC would leave the first syllable quieter than
+  /// the rest); here it only scales the level meter so quiet mics still move it.
   void _applyGain(Float32List s) {
     var peak = 0.0;
     var sum = 0.0;
     for (var i = 0; i < s.length; i++) {
-      final v = s[i] * _gain;
+      final v = (s[i] * _gain).clamp(-1.0, 1.0);
       s[i] = v;
       final a = v.abs();
       if (a > peak) peak = a;
-    }
-    if (_agc) {
-      _env = math.max(peak, _env * 0.95);
-      if (_env > 0.01) {
-        final target = (0.45 / _env).clamp(1.0, 12.0);
-        // Fast release (avoid clipping), slow attack (avoid noise pumping).
-        _agcGain += (target - _agcGain) * (target < _agcGain ? 0.5 : 0.05);
-      }
-      for (var i = 0; i < s.length; i++) {
-        s[i] = (s[i] * _agcGain).clamp(-1.0, 1.0);
-      }
-    } else {
-      for (var i = 0; i < s.length; i++) {
-        s[i] = s[i].clamp(-1.0, 1.0);
-      }
-    }
-    for (final v in s) {
       sum += v * v;
     }
-    final rms = math.sqrt(sum / s.length);
+    var meterGain = 1.0;
+    if (_agc) {
+      _env = math.max(peak, _env * 0.97);
+      meterGain = _env > 0.005 ? (0.45 / _env).clamp(1.0, 20.0) : 1.0;
+    }
+    final rms = math.sqrt(sum / s.length) * meterGain;
     // Map -60..0 dBFS to 0..1.
     final db = 20 * math.log(math.max(rms, 1e-6)) / math.ln10;
     _levels.add(((db + 60) / 60).clamp(0.0, 1.0));

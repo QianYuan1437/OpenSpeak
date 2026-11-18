@@ -16,6 +16,10 @@ constexpr DWORD kCornerPreference = 33;
 constexpr DWORD kCornerRound = 2;
 constexpr DWORD kCornerDefault = 0;
 
+// Tags our own SendInput events so the hook can skip them while still
+// accepting input injected by remote-desktop tools or key remappers.
+constexpr ULONG_PTR kOwnInputTag = 0x4F53504B;  // 'OSPK'
+
 DWORD VkFor(const std::string& name) {
   static const std::map<std::string, DWORD> table = {
       {"RightCtrl", VK_RCONTROL}, {"RightAlt", VK_RMENU},
@@ -70,6 +74,7 @@ INPUT KeyInput(WORD vk, bool up) {
   in.type = INPUT_KEYBOARD;
   in.ki.wVk = vk;
   in.ki.dwFlags = up ? KEYEVENTF_KEYUP : 0;
+  in.ki.dwExtraInfo = kOwnInputTag;
   return in;
 }
 
@@ -148,8 +153,8 @@ LRESULT CALLBACK OpenSpeakNative::KeyboardProc(int code, WPARAM wparam, LPARAM l
   OpenSpeakNative* self = instance_;
   if (code == HC_ACTION && self != nullptr && self->vk_ != 0) {
     const auto* k = reinterpret_cast<KBDLLHOOKSTRUCT*>(lparam);
-    // Ignore our own SendInput traffic.
-    if (!(k->flags & LLKHF_INJECTED) && k->vkCode == self->vk_) {
+    // Ignore our own SendInput traffic (tagged), but not other injected input.
+    if (k->dwExtraInfo != kOwnInputTag && k->vkCode == self->vk_) {
       bool down = wparam == WM_KEYDOWN || wparam == WM_SYSKEYDOWN;
       bool mods_ok = (!self->need_ctrl_ || IsDown(VK_CONTROL)) &&
                      (!self->need_alt_ || IsDown(VK_MENU)) &&
@@ -189,6 +194,7 @@ bool OpenSpeakNative::TypeText(const std::wstring& text) {
     in.type = INPUT_KEYBOARD;
     in.ki.wScan = ch;
     in.ki.dwFlags = KEYEVENTF_UNICODE;
+    in.ki.dwExtraInfo = kOwnInputTag;
     inputs.push_back(in);
     in.ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP;
     inputs.push_back(in);

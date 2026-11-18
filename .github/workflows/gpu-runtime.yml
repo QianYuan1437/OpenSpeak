@@ -1,0 +1,48 @@
+name: GPU runtime pack
+
+# Repackages only the CUDA build of the sherpa-onnx C API + onnxruntime (GPU)
+# from the official sherpa-onnx release into small archives that OpenSpeak
+# downloads on demand. NVIDIA CUDA/cuDNN libraries are fetched separately by
+# the app from PyPI mirrors.
+# Trigger: push a tag named gpu-runtime-<sherpa version>, e.g. gpu-runtime-2.0.1
+on:
+  push:
+    tags: ['gpu-runtime-*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  pack:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download and trim
+        run: |
+          V=${GITHUB_REF_NAME#gpu-runtime-}
+          [[ "$V" == "$GITHUB_REF_NAME" ]] && V=2.0.1
+          B=https://github.com/k2-fsa/sherpa-onnx/releases/download/v$V
+          ORT=1.28.2
+          mkdir -p dist
+          pack() { # $1 = archive, $2 = output name, $3 = find expression
+            curl -sSfL -o a.tar.bz2 "$B/$1"
+            rm -rf x && mkdir x && tar xjf a.tar.bz2 -C x
+            mkdir -p "pk/$2" && find x -type f \( $3 \) -exec cp {} "pk/$2/" \;
+            ls -la "pk/$2"
+            (cd pk && zip -9 -r "../dist/$2.zip" "$2")
+          }
+          pack "sherpa-onnx-v$V-cuda-12.x-cudnn-9.x-onnxruntime$ORT-win-x64-cuda.tar.bz2" \
+            "openspeak-gpu-windows-x64" "-name sherpa-onnx-c-api.dll -o -name onnxruntime.dll -o -name onnxruntime_providers_shared.dll -o -name onnxruntime_providers_cuda.dll"
+          pack "sherpa-onnx-v$V-cuda-12.x-cudnn-9.x-onnxruntime$ORT-linux-x64-gpu.tar.bz2" \
+            "openspeak-gpu-linux-x64" "-name libsherpa-onnx-c-api.so -o -name libonnxruntime.so -o -name libonnxruntime_providers_shared.so -o -name libonnxruntime_providers_cuda.so"
+          (cd dist && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt)
+      - name: Publish
+        env: { GH_TOKEN: '${{ github.token }}' }
+        run: |
+          V=${GITHUB_REF_NAME#gpu-runtime-}
+          [[ "$V" == "$GITHUB_REF_NAME" ]] && V=2.0.1
+          tag=gpu-runtime-$V
+          gh release delete $tag --yes -R ${{ github.repository }} 2>/dev/null || true
+          gh release create $tag dist/* -R ${{ github.repository }} --prerelease \
+            --title "GPU runtime (sherpa-onnx $V, CUDA 12)" \
+            --notes "Downloaded automatically by OpenSpeak when GPU acceleration is enabled. Not needed otherwise."

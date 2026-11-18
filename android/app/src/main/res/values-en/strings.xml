@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">OpenSpeak</string>
+    <string name="bubble_channel">Floating button</string>
+    <string name="bubble_title">OpenSpeak bubble is running</string>
+    <string name="bubble_text">Tap the bubble to talk; results are copied to the clipboard</string>
+    <string name="bubble_copied">Copied to clipboard</string>
+    <string name="a11y_description">When enabled, OpenSpeak inserts recognized speech into the focused text field. OpenSpeak never reads or uploads screen content; recognition runs fully offline.</string>
+</resources>

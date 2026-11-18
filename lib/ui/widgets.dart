@@ -6,6 +6,32 @@ import '../app_state.dart';
 import '../core/dictation.dart';
 import 'theme.dart';
 
+/// Dropdown with the app-wide rounded field and rounded popup menu.
+class OsDropdown<T> extends StatelessWidget {
+  const OsDropdown({super.key, required this.value, required this.items, required this.onChanged, this.label});
+
+  final T value;
+  final List<DropdownMenuItem<T>> items;
+  final ValueChanged<T?> onChanged;
+  final String? label;
+
+  @override
+  Widget build(BuildContext context) {
+    return DropdownButtonFormField<T>(
+      initialValue: value,
+      isExpanded: true,
+      borderRadius: BorderRadius.circular(kRadius),
+      dropdownColor: Theme.of(context).cardTheme.color,
+      icon: const Icon(Icons.expand_more_rounded),
+      menuMaxHeight: 420,
+      decoration: InputDecoration(labelText: label),
+      items: items,
+      onChanged: onChanged,
+    );
+  }
+}
+
+
 Color stateColor(BuildContext context, DictationState s) => switch (s) {
       DictationState.listening => kListening,
       DictationState.processing => kProcessing,
@@ -26,6 +52,10 @@ class MicButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final s = dictation.state;
     final color = stateColor(context, s);
+    // Accent colours are light in dark mode; pick the matching foreground.
+    final fg = s == DictationState.listening || s == DictationState.processing
+        ? Colors.white
+        : Theme.of(context).colorScheme.onPrimary;
     final icon = switch (s) {
       DictationState.listening => Icons.stop_rounded,
       DictationState.processing => Icons.more_horiz_rounded,
@@ -77,9 +107,9 @@ class MicButton extends StatelessWidget {
                       child: s == DictationState.processing || s == DictationState.loading
                           ? Padding(
                               padding: EdgeInsets.all(size * 0.24),
-                              child: const CircularProgressIndicator(strokeWidth: 3, color: Colors.white),
+                              child: CircularProgressIndicator(strokeWidth: 3, color: fg),
                             )
-                          : Icon(icon, color: Colors.white, size: size * 0.38),
+                          : Icon(icon, color: fg, size: size * 0.38),
                     ),
                   ),
                 ),

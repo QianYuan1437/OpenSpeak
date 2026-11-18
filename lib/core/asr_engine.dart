@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:sherpa_onnx/sherpa_onnx.dart' as so;
 
+import 'gpu_loader.dart';
 import 'model_catalog.dart';
 
 const kSampleRate = 16000;
@@ -104,7 +105,9 @@ class AsrEngine {
   }
 
   /// Starts a new dictation session (clears VAD state and buffers).
-  void begin() => _tx?.send(const {'t': 'begin'});
+  /// [autoGain] normalizes each utterance and boosts the VAD input so quiet
+  /// lavalier / wireless mics are detected.
+  void begin({bool autoGain = true}) => _tx?.send({'t': 'begin', 'agc': autoGain});
 
   void feed(Float32List samples) => _tx?.send(
       {'t': 'audio', 'd': TransferableTypedData.fromList([samples])});
@@ -179,7 +182,7 @@ void _workerMain(SendPort out) {
           worker = _Worker.create(m, out);
           out.send({'t': 'ready', 'ms': sw.elapsedMilliseconds});
         case 'begin':
-          worker?.begin();
+          worker?.begin(agc: m['agc'] as bool? ?? true);
         case 'audio':
           final data = (m['d'] as TransferableTypedData).materialize();
           worker?.accept(data.asFloat32List());
@@ -251,8 +254,14 @@ class _Worker {
   /// the VAD flag can flicker during short pauses, so it is not enough alone.
   bool _inSpeech = false;
 
+  bool _agc = true;
+  double _env = 0;
+  double _vadGain = 1;
+
   static _Worker create(Map m, SendPort out) {
-    so.initBindings(m['libDir'] as String?);
+    final libDir = m['libDir'] as String?;
+    if (libDir != null) preloadGpuRuntime(libDir);
+    so.initBindings(libDir);
     final kind = ModelKind.values[m['kind'] as int];
     final f = (m['files'] as Map).cast<String, String>();
     final lang = m['language'] as String;
@@ -322,7 +331,10 @@ class _Worker {
     return _Worker(out, rec, vadConfig, m['partial'] as bool);
   }
 
-  void begin() {
+  void begin({bool? agc}) {
+    if (agc != null) _agc = agc;
+    _vadGain = 1;
+    _env = 0;
     vad.reset();
     _carry.clear();
     _pending.clear();
@@ -345,7 +357,7 @@ class _Worker {
     }
     if (_all.length < kSampleRate * 60) _all.add(samples);
     _pending.add(samples);
-    _carry.add(samples);
+    _carry.add(_agc ? _boostForVad(samples) : samples);
 
     var off = 0;
     final buf = _carry.view();
@@ -373,17 +385,66 @@ class _Worker {
     }
   }
 
+  /// Fast-attack / slow-release gain applied only to the VAD's copy.
+  Float32List _boostForVad(Float32List s) {
+    var peak = 0.0;
+    for (final v in s) {
+      final a = v.abs();
+      if (a > peak) peak = a;
+    }
+    _env = math.max(peak, _env * 0.995);
+    if (_env > 0.003) _vadGain = (0.3 / _env).clamp(1.0, 20.0);
+    if (_vadGain == 1) return s;
+    final out = Float32List(s.length);
+    for (var i = 0; i < s.length; i++) {
+      out[i] = (s[i] * _vadGain).clamp(-1.0, 1.0);
+    }
+    return out;
+  }
+
+  /// Scales a whole utterance to a consistent level (robust peak ≈ 0.6).
+  Float32List _normalize(Float32List s) {
+    if (!_agc || s.isEmpty) return s;
+    final abs = <double>[];
+    for (var i = 0; i < s.length; i += 4) {
+      abs.add(s[i].abs());
+    }
+    abs.sort();
+    final p = abs[(abs.length * 0.998).floor().clamp(0, abs.length - 1)];
+    if (p < 1e-4) return s;
+    final g = (0.6 / p).clamp(0.5, 20.0);
+    if ((g - 1).abs() < 0.1) return s;
+    final out = Float32List(s.length);
+    for (var i = 0; i < s.length; i++) {
+      out[i] = (s[i] * g).clamp(-1.0, 1.0);
+    }
+    return out;
+  }
+
   void _drainSegments() {
     while (!vad.isEmpty()) {
       final seg = vad.front();
       vad.pop();
-      final text = _decode(seg.samples);
+      final text = _decode(_withLeadIn(seg));
       _pending.clear();
       _inSpeech = vad.isDetected();
       if (text.isEmpty) continue;
       _texts.add(text);
       out.send({'t': 'segment', 'text': text});
     }
+  }
+
+  /// Silero reports a segment ~0.1 s after the real speech onset, which
+  /// clips the first syllable. Re-cut the segment from the session buffer
+  /// with 0.3 s of lead-in instead of using the VAD's samples directly.
+  Float32List _withLeadIn(so.SpeechSegment seg) {
+    const lead = kSampleRate * 3 ~/ 10;
+    final end = math.min(seg.start + seg.samples.length, _all.length);
+    if (seg.start < 0 || seg.start >= _all.length || end <= seg.start) {
+      return seg.samples; // beyond the buffered window
+    }
+    final from = math.max(0, seg.start - lead);
+    return Float32List.fromList(Float32List.sublistView(_all.view(), from, end));
   }
 
   void finish() {
@@ -414,7 +475,7 @@ class _Worker {
     final sw = Stopwatch()..start();
     final stream = rec.createStream();
     try {
-      stream.acceptWaveform(samples: samples, sampleRate: kSampleRate);
+      stream.acceptWaveform(samples: _normalize(samples), sampleRate: kSampleRate);
       rec.decode(stream);
       return _clean(rec.getResult(stream).text);
     } finally {

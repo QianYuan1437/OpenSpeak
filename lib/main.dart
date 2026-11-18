@@ -68,8 +68,8 @@ class _OpenSpeakAppState extends State<OpenSpeakApp> {
           title: 'OpenSpeak',
           debugShowCheckedModeBanner: false,
           scaffoldMessengerKey: messengerKey,
-          theme: buildTheme(Brightness.light),
-          darkTheme: buildTheme(Brightness.dark),
+          theme: buildTheme(Brightness.light, accent: settings.accent),
+          darkTheme: buildTheme(Brightness.dark, accent: settings.accent),
           themeMode: dictation.pillMode ? ThemeMode.dark : settings.themeMode,
           home: dictation.pillMode ? const PillView() : const HomeShell(),
         );
