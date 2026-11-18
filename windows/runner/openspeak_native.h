@@ -24,6 +24,8 @@ class OpenSpeakNative {
                                        LPARAM lparam);
 
   static constexpr UINT kHotkeyMessage = WM_APP + 0x51;
+  // Posted by a second OpenSpeak process asking this one to show itself.
+  static constexpr UINT kActivateMessage = WM_APP + 0x52;
 
  private:
   void OnMethodCall(

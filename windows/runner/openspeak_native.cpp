@@ -270,6 +270,10 @@ std::optional<LRESULT> OpenSpeakNative::HandleMessage(HWND hwnd, UINT message,
     channel_->InvokeMethod(wparam ? "hotkeyDown" : "hotkeyUp", nullptr);
     return 0;
   }
+  if (message == kActivateMessage) {
+    channel_->InvokeMethod("activate", nullptr);
+    return 0;
+  }
   if (in_pill_ && message == WM_GETMINMAXINFO) {
     auto* mmi = reinterpret_cast<MINMAXINFO*>(lparam);
     mmi->ptMinTrackSize.x = 1;

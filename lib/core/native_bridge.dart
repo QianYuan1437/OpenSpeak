@@ -4,8 +4,9 @@ import 'package:flutter/services.dart';
 
 import 'settings.dart';
 
-/// Events pushed from the native side (hotkeys, Android bubble).
-enum NativeEvent { hotkeyDown, hotkeyUp, bubbleTap, bubblePressStart, bubblePressEnd }
+/// Events pushed from the native side (hotkeys, Android bubble, a second
+/// desktop launch asking this instance to show itself).
+enum NativeEvent { hotkeyDown, hotkeyUp, bubbleTap, bubblePressStart, bubblePressEnd, activate }
 
 /// Thin wrapper over the `openspeak/native` method channel implemented in
 /// the Windows/Linux runners and the Android host.
@@ -18,6 +19,7 @@ class NativeBridge {
         'bubbleTap' => NativeEvent.bubbleTap,
         'bubblePressStart' => NativeEvent.bubblePressStart,
         'bubblePressEnd' => NativeEvent.bubblePressEnd,
+        'activate' => NativeEvent.activate,
         _ => null,
       };
       if (ev != null) _events.add(ev);

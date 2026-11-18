@@ -306,3 +306,5 @@ void openspeak_native_init(GtkWindow* window, FlView* view) {
   fl_method_channel_set_method_call_handler(g_state.channel, method_call_cb, nullptr,
                                             nullptr);
 }
+
+void openspeak_native_activate() { send_event("activate"); }

@@ -6,6 +6,7 @@ import 'package:window_manager/window_manager.dart';
 
 import '../app_state.dart';
 import '../core/dictation.dart';
+import '../core/native_bridge.dart';
 import 'i18n.dart';
 
 /// Window + system tray behaviour for Windows/Linux: closing the window keeps
@@ -14,7 +15,7 @@ class DesktopShell with WindowListener, TrayListener {
   DesktopShell._();
   static final _instance = DesktopShell._();
 
-  static Future<void> init() async {
+  static Future<void> init({bool forceShow = false}) async {
     await windowManager.ensureInitialized();
     const options = WindowOptions(
       size: Size(1000, 700),
@@ -24,7 +25,7 @@ class DesktopShell with WindowListener, TrayListener {
       titleBarStyle: TitleBarStyle.normal,
     );
     await windowManager.waitUntilReadyToShow(options, () async {
-      if (!settings.startHidden) {
+      if (forceShow || !settings.startHidden) {
         await windowManager.show();
         await windowManager.focus();
       }
@@ -33,6 +34,9 @@ class DesktopShell with WindowListener, TrayListener {
     windowManager.addListener(_instance);
     await _instance._initTray();
     dictation.addListener(_instance._syncTray);
+    dictation.bridge.events.where((e) => e == NativeEvent.activate).listen((_) {
+      if (!dictation.pillMode) showMain();
+    });
   }
 
   DictationState? _trayState;
@@ -72,6 +76,7 @@ class DesktopShell with WindowListener, TrayListener {
   }
 
   static Future<void> showMain() async {
+    if (await windowManager.isMinimized()) await windowManager.restore();
     await windowManager.show();
     await windowManager.focus();
   }

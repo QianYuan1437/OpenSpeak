@@ -14,7 +14,8 @@ import 'ui/i18n.dart';
 import 'ui/pill_view.dart';
 import 'ui/theme.dart';
 
-Future<void> main() async {
+/// `--install-gpu` opens the Models page and starts downloading the CUDA pack.
+Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
   settings = Settings();
   await settings.load();
@@ -24,9 +25,14 @@ Future<void> main() async {
   gpu = GpuManager();
   await gpu.init();
   dictation = Dictation(settings, models, gpu);
-  if (isDesktop) await DesktopShell.init();
+  final installGpu = args.contains('--install-gpu') && gpu.available && !gpu.ready;
+  if (installGpu) {
+    HomeShell.initialPage = 2;
+  }
+  if (isDesktop) await DesktopShell.init(forceShow: installGpu);
   runApp(const OpenSpeakApp());
   unawaited(dictation.init());
+  if (installGpu) unawaited(dictation.installGpu());
 }
 
 final messengerKey = GlobalKey<ScaffoldMessengerState>();

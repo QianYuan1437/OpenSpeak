@@ -89,7 +89,7 @@ class GpuCard extends StatelessWidget {
             FilledButton.tonalIcon(
               icon: const Icon(Icons.download_rounded, size: 18),
               label: Text(t('下载 CUDA 加速包', 'Download CUDA pack')),
-              onPressed: () => gpu.install(),
+              onPressed: dictation.installGpu,
             )
           else ...[
             if (needsRestart && !running)

@@ -108,6 +108,15 @@ class Dictation extends ChangeNotifier {
 
   // Models ------------------------------------------------------------------
 
+  /// Downloads the CUDA pack and turns GPU acceleration on once it is ready.
+  Future<void> installGpu() async {
+    await gpu.install();
+    if (gpu.ready) {
+      await settings.update((s) => s.useGpu = true);
+      await ensureModel(force: true);
+    }
+  }
+
   /// Loads the selected model if installed and not already loaded.
   Future<void> ensureModel({bool force = false}) async {
     final spec = currentModel;
@@ -241,6 +250,8 @@ class Dictation extends ChangeNotifier {
         if (!isActive) start(external: true);
       case NativeEvent.bubblePressEnd:
         if (state == DictationState.listening) stop();
+      case NativeEvent.activate:
+        break; // Window handling lives in DesktopShell.
     }
   }
 

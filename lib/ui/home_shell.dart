@@ -11,13 +11,16 @@ import 'settings_page.dart';
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
 
+  /// Page shown first (0 dictation, 1 history, 2 models, 3 settings).
+  static int initialPage = 0;
+
   @override
   State<HomeShell> createState() => _HomeShellState();
 }
 
 class _HomeShellState extends State<HomeShell> {
   // Static so the selected page survives the rebuild after pill mode.
-  static int _index = 0;
+  static int _index = HomeShell.initialPage;
 
   void go(int i) => setState(() => _index = i);
 
