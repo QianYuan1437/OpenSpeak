@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/painting.dart' show Size;
 import 'package:record/record.dart' show InputDevice;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -270,9 +271,7 @@ class Dictation extends ChangeNotifier {
       final active = await bridge.isWindowActive();
       _deliverExternally = !active;
       if (!active) {
-        _pill = true;
-        notifyListeners();
-        await bridge.enterPill(440, 92);
+        await _showPill();
       }
     }
     segments.clear();
@@ -304,6 +303,27 @@ class Dictation extends ChangeNotifier {
     notifyListeners();
     await capture.stop();
     engine.end();
+  }
+
+  static const pillSize = Size(460, 72);
+
+  Future<void> _showPill() async {
+    _pill = true;
+    notifyListeners();
+    await bridge.enterPill(pillSize.width, pillSize.height,
+        position: settings.pillPosition, opacity: settings.pillOpacity);
+  }
+
+  /// Shows the pill for a moment so its position/opacity can be judged.
+  Future<void> previewPill(String sample) async {
+    if (isActive || _pill) return;
+    partial = sample;
+    await _showPill();
+    await Future<void>.delayed(const Duration(milliseconds: 2500));
+    partial = '';
+    _pill = false;
+    await bridge.exitPill();
+    notifyListeners();
   }
 
   /// Aborts the session without output.

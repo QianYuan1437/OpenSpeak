@@ -89,6 +89,10 @@ class Settings extends ChangeNotifier {
   /// 'system', 'zh' or 'en'.
   String uiLanguage = 'system';
   bool soundCue = true;
+
+  /// Recording pill: 'center' | 'top' | 'bottom', and window opacity.
+  String pillPosition = 'center';
+  double pillOpacity = 0.8;
   bool startHidden = false;
   bool bubbleEnabled = false;
 
@@ -119,6 +123,8 @@ class Settings extends ChangeNotifier {
       accent = m['accent'] as int? ?? accent;
       uiLanguage = m['uiLanguage'] as String? ?? uiLanguage;
       soundCue = m['soundCue'] as bool? ?? soundCue;
+      pillPosition = m['pillPosition'] as String? ?? pillPosition;
+      pillOpacity = (m['pillOpacity'] as num?)?.toDouble() ?? pillOpacity;
       startHidden = m['startHidden'] as bool? ?? startHidden;
       bubbleEnabled = m['bubbleEnabled'] as bool? ?? bubbleEnabled;
     } catch (_) {
@@ -151,6 +157,8 @@ class Settings extends ChangeNotifier {
         'accent': accent,
         'uiLanguage': uiLanguage,
         'soundCue': soundCue,
+        'pillPosition': pillPosition,
+        'pillOpacity': pillOpacity,
         'startHidden': startHidden,
         'bubbleEnabled': bubbleEnabled,
       };

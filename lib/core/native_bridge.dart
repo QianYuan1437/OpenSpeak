@@ -55,9 +55,11 @@ class NativeBridge {
   /// Sends the platform paste shortcut to the focused window.
   Future<bool> sendPaste() async => await _call<bool>('sendPaste') ?? false;
 
-  /// Shows the window as a small always-on-top pill without taking focus.
-  Future<void> enterPill(double width, double height) =>
-      _call('enterPill', {'width': width, 'height': height});
+  /// Shows the window as a small translucent always-on-top capsule without
+  /// taking focus. [position]: 'center' | 'top' | 'bottom'.
+  Future<void> enterPill(double width, double height,
+          {String position = 'center', double opacity = 0.85}) =>
+      _call('enterPill', {'width': width, 'height': height, 'position': position, 'opacity': opacity});
 
   /// Hides the pill and restores the normal window geometry (hidden).
   Future<void> exitPill() => _call('exitPill', {'minWidth': 760, 'minHeight': 540});

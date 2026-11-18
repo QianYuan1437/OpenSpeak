@@ -16,7 +16,8 @@ class HomeShell extends StatefulWidget {
 }
 
 class _HomeShellState extends State<HomeShell> {
-  int _index = 0;
+  // Static so the selected page survives the rebuild after pill mode.
+  static int _index = 0;
 
   void go(int i) => setState(() => _index = i);
 

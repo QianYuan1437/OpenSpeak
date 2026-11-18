@@ -7,6 +7,7 @@ import '../core/audio_capture.dart';
 import '../core/dictation.dart';
 import '../core/mic_profiles.dart';
 import '../core/settings.dart';
+import 'desktop_shell.dart';
 import 'home_shell.dart';
 import 'i18n.dart';
 import 'theme.dart';
@@ -256,6 +257,44 @@ class _SettingsPageState extends State<SettingsPage> {
         const SizedBox(height: 6),
         Text('${t('当前', 'Current')}: ${h.label}', style: TextStyle(color: scheme.outline, fontSize: 12)),
         const SizedBox(height: 16),
+        Text(t('录音浮条', 'Recording pill'), style: TextStyle(color: scheme.onSurfaceVariant)),
+        const SizedBox(height: 6),
+        Wrap(spacing: 12, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
+          SegmentedButton<String>(
+            segments: [
+              ButtonSegment(value: 'center', label: Text(t('屏幕中央', 'Center'))),
+              ButtonSegment(value: 'top', label: Text(t('顶部', 'Top'))),
+              ButtonSegment(value: 'bottom', label: Text(t('底部', 'Bottom'))),
+            ],
+            selected: {settings.pillPosition},
+            onSelectionChanged: (v) => settings.update((s) => s.pillPosition = v.first),
+          ),
+          OutlinedButton.icon(
+            icon: const Icon(Icons.visibility_outlined, size: 18),
+            label: Text(t('预览', 'Preview')),
+            onPressed: dictation.isActive
+                ? null
+                : () async {
+                    await dictation.previewPill(t('这是录音浮条的预览效果', 'This is how the pill looks'));
+                    await DesktopShell.showMain();
+                  },
+          ),
+        ]),
+        Row(children: [
+          Text(t('不透明度', 'Opacity'), style: TextStyle(color: scheme.onSurfaceVariant)),
+          Expanded(
+            child: Slider(
+              min: 0.5,
+              max: 1.0,
+              divisions: 10,
+              value: settings.pillOpacity.clamp(0.5, 1.0),
+              label: '${(settings.pillOpacity * 100).round()}%',
+              onChanged: (v) => settings.update((s) => s.pillOpacity = v),
+            ),
+          ),
+          SizedBox(width: 44, child: Text('${(settings.pillOpacity * 100).round()}%', textAlign: TextAlign.end)),
+        ]),
+        const SizedBox(height: 12),
         Text(t('输出到当前应用的方式', 'How text reaches the focused app'),
             style: TextStyle(color: scheme.onSurfaceVariant)),
         const SizedBox(height: 6),

@@ -3,6 +3,7 @@
 #include <dwmapi.h>
 #include <flutter_windows.h>
 
+#include <algorithm>
 #include <map>
 #include <string>
 #include <vector>
@@ -13,7 +14,6 @@ namespace {
 
 // DWMWA_WINDOW_CORNER_PREFERENCE is only in newer SDKs.
 constexpr DWORD kCornerPreference = 33;
-constexpr DWORD kCornerRound = 2;
 constexpr DWORD kCornerDefault = 0;
 
 // Tags our own SendInput events so the hook can skip them while still
@@ -110,7 +110,8 @@ void OpenSpeakNative::OnMethodCall(
   } else if (method == "sendPaste") {
     result->Success(flutter::EncodableValue(SendPaste()));
   } else if (method == "enterPill" && args) {
-    EnterPill(GetDouble(*args, "width", 440), GetDouble(*args, "height", 92));
+    EnterPill(GetDouble(*args, "width", 440), GetDouble(*args, "height", 72),
+              GetString(*args, "position"), GetDouble(*args, "opacity", 0.85));
     result->Success();
   } else if (method == "exitPill") {
     ExitPill();
@@ -211,7 +212,8 @@ bool OpenSpeakNative::SendPaste() {
 
 // Pill window ----------------------------------------------------------------
 
-void OpenSpeakNative::EnterPill(double width, double height) {
+void OpenSpeakNative::EnterPill(double width, double height, const std::string& position,
+                                double opacity) {
   if (!in_pill_) {
     saved_placement_.length = sizeof(WINDOWPLACEMENT);
     GetWindowPlacement(window_, &saved_placement_);
@@ -230,13 +232,20 @@ void OpenSpeakNative::EnterPill(double width, double height) {
   int h = static_cast<int>(height * scale);
   const RECT& wa = info.rcWork;
   int x = wa.left + (wa.right - wa.left - w) / 2;
-  int y = wa.bottom - h - static_cast<int>(56 * scale);
+  int margin = static_cast<int>(72 * scale);
+  int y = position == "top"      ? wa.top + margin
+          : position == "bottom" ? wa.bottom - h - margin
+                                 : wa.top + (wa.bottom - wa.top - h) / 2;
 
   SetWindowLongPtr(window_, GWL_STYLE, WS_POPUP);
   SetWindowLongPtr(window_, GWL_EXSTYLE,
-                   WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW);
-  DWORD corner = kCornerRound;
+                   WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_LAYERED);
+  // Whole-window translucency + capsule outline.
+  BYTE alpha = static_cast<BYTE>(std::clamp(opacity, 0.3, 1.0) * 255);
+  SetLayeredWindowAttributes(window_, 0, alpha, LWA_ALPHA);
+  DWORD corner = kCornerDefault;
   DwmSetWindowAttribute(window_, kCornerPreference, &corner, sizeof(corner));
+  SetWindowRgn(window_, CreateRoundRectRgn(0, 0, w + 1, h + 1, h, h), FALSE);
   SetWindowPos(window_, HWND_TOPMOST, x, y, w, h,
                SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_FRAMECHANGED);
 }
@@ -245,10 +254,9 @@ void OpenSpeakNative::ExitPill() {
   if (!in_pill_) return;
   ShowWindow(window_, SW_HIDE);
   in_pill_ = false;
+  SetWindowRgn(window_, nullptr, FALSE);
   SetWindowLongPtr(window_, GWL_STYLE, saved_style_ & ~WS_VISIBLE);
   SetWindowLongPtr(window_, GWL_EXSTYLE, saved_ex_style_);
-  DWORD corner = kCornerDefault;
-  DwmSetWindowAttribute(window_, kCornerPreference, &corner, sizeof(corner));
   WINDOWPLACEMENT p = saved_placement_;
   p.showCmd = SW_HIDE;
   SetWindowPlacement(window_, &p);

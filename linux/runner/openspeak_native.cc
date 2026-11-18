@@ -1,5 +1,7 @@
 #include "openspeak_native.h"
 
+#include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <map>
 #include <string>
@@ -148,7 +150,20 @@ bool grab(const std::string& key, bool ctrl, bool alt, bool shift, bool meta) {
 
 #endif  // GDK_WINDOWING_X11
 
-void enter_pill(int w, int h) {
+// Capsule-shaped input/paint region built from one rectangle per scanline.
+cairo_region_t* capsule_region(int w, int h) {
+  cairo_region_t* region = cairo_region_create();
+  double r = h / 2.0;
+  for (int y = 0; y < h; y++) {
+    double dy = r - (y + 0.5);
+    int inset = static_cast<int>(r - std::sqrt(std::max(0.0, r * r - dy * dy)));
+    cairo_rectangle_int_t row = {inset, y, w - 2 * inset, 1};
+    cairo_region_union_rectangle(region, &row);
+  }
+  return region;
+}
+
+void enter_pill(int w, int h, const std::string& position, double opacity) {
   GtkWindow* win = g_state.window;
   if (!g_state.in_pill) {
     gtk_window_get_position(win, &g_state.saved_x, &g_state.saved_y);
@@ -177,8 +192,17 @@ void enter_pill(int w, int h) {
   GdkMonitor* mon = gdk_display_get_monitor_at_point(display, px, py);
   GdkRectangle wa;
   gdk_monitor_get_workarea(mon, &wa);
-  gtk_window_move(win, wa.x + (wa.width - w) / 2, wa.y + wa.height - h - 56);
+  int margin = 72;
+  int y = position == "top"      ? wa.y + margin
+          : position == "bottom" ? wa.y + wa.height - h - margin
+                                 : wa.y + (wa.height - h) / 2;
+  gtk_window_move(win, wa.x + (wa.width - w) / 2, y);
   gtk_widget_show(GTK_WIDGET(win));
+  // Translucent capsule (opacity needs a compositing window manager).
+  cairo_region_t* shape = capsule_region(w, h);
+  gtk_widget_shape_combine_region(GTK_WIDGET(win), shape);
+  cairo_region_destroy(shape);
+  gtk_widget_set_opacity(GTK_WIDGET(win), std::clamp(opacity, 0.3, 1.0));
 }
 
 void exit_pill(int min_w, int min_h) {
@@ -186,6 +210,8 @@ void exit_pill(int min_w, int min_h) {
   GtkWindow* win = g_state.window;
   g_state.in_pill = false;
   gtk_widget_hide(GTK_WIDGET(win));
+  gtk_widget_shape_combine_region(GTK_WIDGET(win), nullptr);
+  gtk_widget_set_opacity(GTK_WIDGET(win), 1.0);
   gtk_window_set_keep_above(win, FALSE);
   gtk_window_set_decorated(win, TRUE);
   gtk_window_set_accept_focus(win, TRUE);
@@ -209,6 +235,15 @@ int64_t arg_int(FlValue* args, const char* key, int64_t def) {
   if (v == nullptr) return def;
   if (fl_value_get_type(v) == FL_VALUE_TYPE_INT) return fl_value_get_int(v);
   if (fl_value_get_type(v) == FL_VALUE_TYPE_FLOAT) return (int64_t)fl_value_get_float(v);
+  return def;
+}
+
+double arg_double(FlValue* args, const char* key, double def) {
+  if (args == nullptr || fl_value_get_type(args) != FL_VALUE_TYPE_MAP) return def;
+  FlValue* v = fl_value_lookup_string(args, key);
+  if (v == nullptr) return def;
+  if (fl_value_get_type(v) == FL_VALUE_TYPE_FLOAT) return fl_value_get_float(v);
+  if (fl_value_get_type(v) == FL_VALUE_TYPE_INT) return fl_value_get_int(v);
   return def;
 }
 
@@ -243,7 +278,8 @@ void method_call_cb(FlMethodChannel* channel, FlMethodCall* call, gpointer user_
 #endif
     response = FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
   } else if (strcmp(method, "enterPill") == 0) {
-    enter_pill(arg_int(args, "width", 440), arg_int(args, "height", 92));
+    enter_pill(arg_int(args, "width", 440), arg_int(args, "height", 72),
+               arg_string(args, "position"), arg_double(args, "opacity", 0.85));
     response = FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
   } else if (strcmp(method, "exitPill") == 0) {
     exit_pill(arg_int(args, "minWidth", 760), arg_int(args, "minHeight", 540));

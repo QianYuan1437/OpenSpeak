@@ -8,6 +8,7 @@
 
 #include <memory>
 #include <optional>
+#include <string>
 
 // Implements the "openspeak/native" channel on Windows: a low-level keyboard
 // hook for the push-to-talk hotkey, Unicode text injection via SendInput and
@@ -33,7 +34,7 @@ class OpenSpeakNative {
   void UnregisterHotkey();
   bool TypeText(const std::wstring& text);
   bool SendPaste();
-  void EnterPill(double width, double height);
+  void EnterPill(double width, double height, const std::string& position, double opacity);
   void ExitPill();
 
   static LRESULT CALLBACK KeyboardProc(int code, WPARAM wparam, LPARAM lparam);
