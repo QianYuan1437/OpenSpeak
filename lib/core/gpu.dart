@@ -152,6 +152,13 @@ class GpuManager extends ChangeNotifier {
       var done = 0;
       for (var i = 0; i < jobs.length; i++) {
         final (urls, hash, name, extract) = jobs[i];
+        // Archives already unpacked by an interrupted install are skipped; the
+        // markers live in the pack folder so removing the pack clears them.
+        final unpacked = File(p.join(packDir.path, '.done-$name'));
+        if (await unpacked.exists()) {
+          done += sizes[i];
+          continue;
+        }
         final dest = File(p.join(tmp.path, name));
         // A finished download from an interrupted install is reused.
         if (!await dest.exists() || await dest.length() != sizes[i]) {
@@ -164,6 +171,7 @@ class GpuManager extends ChangeNotifier {
         progress = DownloadProgress(done + sizes[i], total, 'extract', source: name);
         notifyListeners();
         await extract(dest.path);
+        await unpacked.create();
         await dest.delete();
         done += sizes[i];
       }
@@ -282,7 +290,7 @@ class GpuManager extends ChangeNotifier {
     final c = _client();
     try {
       final req = await c.headUrl(url);
-      final res = await req.close();
+      final res = await req.close().timeout(const Duration(seconds: 20));
       await res.drain<void>();
       if (res.statusCode >= 400) throw HttpException('HTTP ${res.statusCode}', uri: url);
       return res.contentLength;
@@ -323,7 +331,8 @@ class GpuManager extends ChangeNotifier {
     try {
       final req = await c.getUrl(url);
       if (have > 0) req.headers.set('Range', 'bytes=$have-');
-      final res = await req.close();
+      // A mirror that accepts the connection but never answers moves on.
+      final res = await req.close().timeout(const Duration(seconds: 20));
       if (res.statusCode == 416) {
         await res.drain<void>();
       } else {

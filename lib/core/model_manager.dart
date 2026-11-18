@@ -185,7 +185,7 @@ class ModelManager extends ChangeNotifier {
       final req = await c.openUrl(method, u);
       req.followRedirects = false;
       if (from != null && from > 0) req.headers.set('Range', 'bytes=$from-');
-      final res = await req.close();
+      final res = await req.close().timeout(const Duration(seconds: 20));
       if (res.isRedirect) {
         final loc = res.headers.value(HttpHeaders.locationHeader);
         await res.drain<void>();
