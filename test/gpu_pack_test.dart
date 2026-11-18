@@ -22,7 +22,7 @@ void main() {
       if (pct ~/ 10 != last ~/ 10) {
         last = pct;
         // ignore: avoid_print
-        print('${p.stage} $pct% ${p.source}');
+        print('${p.stage} $pct% ${p.source} ${DateTime.now().toIso8601String().substring(11, 19)}');
       }
     });
     await gpu.install(includeRuntime: false);

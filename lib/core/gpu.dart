@@ -111,38 +111,38 @@ class GpuManager extends ChangeNotifier {
       if (await marker.exists()) await marker.delete();
 
       // Resolve every download first so progress covers the whole pack.
-      final jobs = <(Uri, String?, String, Future<void> Function(String))>[];
+      final jobs = <(List<Uri>, String?, String, Future<void> Function(String))>[];
       final os = Platform.isWindows ? 'windows' : 'linux';
       final runtime = 'openspeak-gpu-$os-x64.zip';
       if (includeRuntime) {
         jobs.add((
-          Uri.parse('$_repo/releases/download/gpu-runtime-$sherpaVersion/$runtime'),
+          [Uri.parse('$_repo/releases/download/gpu-runtime-$sherpaVersion/$runtime')],
           null,
           runtime,
           (file) => _extract(file, (name) => !name.endsWith('/'), flatten: true),
         ));
       }
       for (final w in _wheels) {
-        final (url, hash) = await _findWheel(w);
+        final (urls, hash) = await _findWheel(w);
         jobs.add((
-          url,
+          urls,
           hash,
-          Uri.decodeComponent(p.basename(url.path)),
+          Uri.decodeComponent(p.basename(urls.first.path)),
           (file) => _extract(file, (name) => name.startsWith(w.dir) && w.pattern.hasMatch(name),
               flatten: true),
         ));
       }
       final sizes = <int>[];
       for (final j in jobs) {
-        sizes.add(await _length(j.$1));
+        sizes.add(await _length(j.$1.first));
       }
       final total = sizes.fold<int>(0, (a, b) => a + b);
       var done = 0;
       for (var i = 0; i < jobs.length; i++) {
-        final (url, hash, name, extract) = jobs[i];
+        final (urls, hash, name, extract) = jobs[i];
         final dest = File(p.join(tmp.path, name));
-        await _fetch(url, dest, (got) {
-          progress = DownloadProgress(done + got, total, 'download', source: url.host);
+        await _fetchAny(urls, dest, (host, got) {
+          progress = DownloadProgress(done + got, total, 'download', source: host);
           notifyListeners();
         });
         if (hash != null) await _verify(dest, hash);
@@ -163,18 +163,16 @@ class GpuManager extends ChangeNotifier {
     }
   }
 
-  /// Picks the newest wheel of the required major version from the first
-  /// mirror that answers. Returns its URL and sha256.
-  Future<(Uri, String?)> _findWheel(_Wheel w) async {
+  /// Picks the newest wheel of the required major version and returns its
+  /// URL on every mirror that has it (in mirror order) plus its sha256.
+  Future<(List<Uri>, String?)> _findWheel(_Wheel w) async {
     final failures = <String>[];
-    for (final m in _mirrors) {
+    final found = await Future.wait(_mirrors.map((m) async {
       try {
         final index = Uri.parse('$m/simple/${w.package}/');
         final html = await _getText(index);
         final re = RegExp(r'href="([^"]+/([^/"#]+\.whl))(?:#sha256=([0-9a-f]+))?"');
-        Uri? best;
-        String? bestHash;
-        List<int>? bestVer;
+        final wheels = <String, (Uri, String?, List<int>)>{};
         for (final mt in re.allMatches(html)) {
           final file = mt.group(2)!;
           if (!file.contains(_platformTag) || !file.contains('x86_64') && !file.contains('amd64')) {
@@ -182,19 +180,26 @@ class GpuManager extends ChangeNotifier {
           }
           final ver = file.split('-')[1].split('.').map((e) => int.tryParse(e) ?? 0).toList();
           if (ver.first != w.major) continue;
-          if (bestVer == null || _cmp(ver, bestVer) > 0) {
-            bestVer = ver;
-            best = index.resolve(mt.group(1)!);
-            bestHash = mt.group(3);
-          }
+          wheels[file] = (index.resolve(mt.group(1)!), mt.group(3), ver);
         }
-        if (best != null) return (best, bestHash);
-        failures.add('$m: no wheel');
+        if (wheels.isEmpty) failures.add('$m: no wheel');
+        return wheels;
       } catch (e) {
         failures.add('$m: $e');
+        return <String, (Uri, String?, List<int>)>{};
+      }
+    }));
+    String? best;
+    List<int>? bestVer;
+    for (final wheels in found) {
+      for (final MapEntry(key: file, value: (_, _, ver)) in wheels.entries) {
+        if (bestVer == null || _cmp(ver, bestVer) > 0) (best, bestVer) = (file, ver);
       }
     }
-    throw Exception('${w.package}: ${failures.join('; ')}');
+    if (best == null) throw Exception('${w.package}: ${failures.join('; ')}');
+    final urls = [for (final wheels in found) if (wheels[best] case (final url, _, _)) url];
+    final hash = found.map((wheels) => wheels[best]?.$2).firstWhere((h) => h != null, orElse: () => null);
+    return (urls, hash);
   }
 
   static int _cmp(List<int> a, List<int> b) {
@@ -261,7 +266,32 @@ class GpuManager extends ChangeNotifier {
     }
   }
 
-  Future<void> _fetch(Uri url, File dest, void Function(int) onBytes) async {
+  /// Below this speed (bytes/s, measured over [_rateWindow]) a download moves
+  /// on to the next mirror. Mirrors share one `.part` file, so the bytes
+  /// already fetched are kept.
+  static const _minRate = 300 * 1024;
+  static const _rateWindow = Duration(seconds: 12);
+
+  /// Downloads from the first mirror that is fast enough; if every mirror is
+  /// slow or failing, makes a second pass that accepts any speed.
+  Future<void> _fetchAny(List<Uri> urls, File dest, void Function(String host, int got) onBytes) async {
+    Object? lastError;
+    for (final strict in [true, false]) {
+      for (final url in urls) {
+        try {
+          await _fetch(url, dest, (got) => onBytes(url.host, got), minRate: strict && urls.length > 1 ? _minRate : 0);
+          return;
+        } on DownloadCancelled {
+          rethrow;
+        } catch (e) {
+          lastError = e;
+        }
+      }
+    }
+    throw lastError!;
+  }
+
+  Future<void> _fetch(Uri url, File dest, void Function(int) onBytes, {int minRate = 0}) async {
     final part = File('${dest.path}.part');
     var have = await part.exists() ? await part.length() : 0;
     final c = _client();
@@ -277,14 +307,22 @@ class GpuManager extends ChangeNotifier {
         final sink = part.openWrite(mode: have > 0 ? FileMode.append : FileMode.write);
         var got = have;
         var last = DateTime.now();
+        var windowStart = last;
+        var windowBytes = got;
         try {
           await for (final chunk in res.timeout(const Duration(seconds: 30))) {
             if (_cancel) throw DownloadCancelled();
             sink.add(chunk);
             got += chunk.length;
-            if (DateTime.now().difference(last).inMilliseconds > 250) {
-              last = DateTime.now();
+            final now = DateTime.now();
+            if (now.difference(last).inMilliseconds > 250) {
+              last = now;
               onBytes(got);
+            }
+            if (now.difference(windowStart) >= _rateWindow) {
+              final rate = (got - windowBytes) / now.difference(windowStart).inSeconds;
+              if (rate < minRate) throw _SlowMirror(url.host);
+              (windowStart, windowBytes) = (now, got);
             }
           }
         } finally {
@@ -296,4 +334,12 @@ class GpuManager extends ChangeNotifier {
       c.close(force: true);
     }
   }
+}
+
+class _SlowMirror implements Exception {
+  _SlowMirror(this.host);
+  final String host;
+
+  @override
+  String toString() => '$host: too slow';
 }
