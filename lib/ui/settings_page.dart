@@ -94,33 +94,37 @@ class _SettingsPageState extends State<SettingsPage> {
         onPressed: dictation.refreshDevices,
       ),
       children: [
-        OsDropdown<String?>(
-          value: value,
-          label: t('输入设备', 'Input device'),
-          items: [
-            DropdownMenuItem(
-              value: null,
-              child: Text(t('自动（优先无线麦克风，否则系统默认）', 'Auto (prefer wireless mic, else system default)')),
-            ),
-            for (final d in dictation.devices)
+        SettingRow(
+          title: t('输入设备', 'Input device'),
+          subtitle: value == null ? t('自动：优先无线麦克风，否则系统默认', 'Auto: wireless mic first, else system default') : null,
+          trailing: OsDropdown<String?>(
+            value: value,
+            maxWidth: 340,
+            items: [
               DropdownMenuItem(
-                value: d.id,
-                child: Row(children: [
-                  if (detectMicBrand(d.label) != null) ...[
-                    Icon(Icons.settings_input_antenna_rounded, size: 16, color: scheme.primary),
-                    const SizedBox(width: 6),
-                  ],
-                  Expanded(child: Text(d.label, overflow: TextOverflow.ellipsis)),
-                ]),
+                value: null,
+                child: Text(t('自动', 'Auto')),
               ),
-          ],
-          onChanged: (v) async {
-            await dictation.selectDevice(v);
-            await _restartTest();
-          },
+              for (final d in dictation.devices)
+                DropdownMenuItem(
+                  value: d.id,
+                  child: Row(children: [
+                    if (detectMicBrand(d.label) != null) ...[
+                      Icon(Icons.settings_input_antenna_rounded, size: 16, color: scheme.primary),
+                      const SizedBox(width: 6),
+                    ],
+                    Expanded(child: Text(d.label, overflow: TextOverflow.ellipsis)),
+                  ]),
+                ),
+            ],
+            onChanged: (v) async {
+              await dictation.selectDevice(v);
+              await _restartTest();
+            },
+          ),
         ),
         if (brand != null) ...[
-          const SizedBox(height: 10),
+          const SizedBox(height: 4),
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
@@ -229,17 +233,14 @@ class _SettingsPageState extends State<SettingsPage> {
         ),
         const SizedBox(height: 14),
         Row(children: [
-          SizedBox(
-            width: 180,
-            child: OsDropdown<String>(
-              value: h.key,
-              label: t('按键', 'Key'),
-              items: [
-                for (final k in Hotkey.keys)
-                  DropdownMenuItem(value: k, child: Text(Hotkey.keyLabels[k] ?? k)),
-              ],
-              onChanged: (v) => setKey(h.copyWith(key: v)),
-            ),
+          Text(t('按键', 'Key'), style: TextStyle(color: scheme.onSurfaceVariant)),
+          const SizedBox(width: 12),
+          OsDropdown<String>(
+            value: h.key,
+            items: [
+              for (final k in Hotkey.keys) DropdownMenuItem(value: k, child: Text(Hotkey.keyLabels[k] ?? k)),
+            ],
+            onChanged: (v) => setKey(h.copyWith(key: v)),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -348,14 +349,17 @@ class _SettingsPageState extends State<SettingsPage> {
       icon: Icons.translate_rounded,
       children: [
         if (spec?.id.startsWith('sense-voice') ?? false)
-          OsDropdown<String>(
-            value: settings.language,
-            label: t('语言', 'Language'),
-            items: [for (final e in langs.entries) DropdownMenuItem(value: e.key, child: Text(e.value))],
-            onChanged: (v) async {
-              await settings.update((s) => s.language = v ?? 'auto');
-              await dictation.ensureModel(force: true);
-            },
+          SettingRow(
+            title: t('语言', 'Language'),
+            subtitle: t('指定语言可提升短句准确率', 'Fixing the language helps with short phrases'),
+            trailing: OsDropdown<String>(
+              value: settings.language,
+              items: [for (final e in langs.entries) DropdownMenuItem(value: e.key, child: Text(e.value))],
+              onChanged: (v) async {
+                await settings.update((s) => s.language = v ?? 'auto');
+                await dictation.ensureModel(force: true);
+              },
+            ),
           ),
         SwitchListTile(
           contentPadding: EdgeInsets.zero,

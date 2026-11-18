@@ -6,31 +6,86 @@ import '../app_state.dart';
 import '../core/dictation.dart';
 import 'theme.dart';
 
-/// Dropdown with the app-wide rounded field and rounded popup menu.
+/// Compact rounded dropdown that sizes itself to its widest item (up to
+/// [maxWidth]); long items are ellipsized. Meant to sit at the end of a
+/// [SettingRow] rather than stretch across the card.
 class OsDropdown<T> extends StatelessWidget {
-  const OsDropdown({super.key, required this.value, required this.items, required this.onChanged, this.label});
+  const OsDropdown({super.key, required this.value, required this.items, required this.onChanged, this.maxWidth = 320});
 
   final T value;
   final List<DropdownMenuItem<T>> items;
   final ValueChanged<T?> onChanged;
-  final String? label;
+  final double maxWidth;
 
   @override
   Widget build(BuildContext context) {
-    return DropdownButtonFormField<T>(
-      initialValue: value,
-      isExpanded: true,
-      borderRadius: BorderRadius.circular(kRadius),
-      dropdownColor: Theme.of(context).cardTheme.color,
-      icon: const Icon(Icons.expand_more_rounded),
-      menuMaxHeight: 420,
-      decoration: InputDecoration(labelText: label),
-      items: items,
-      onChanged: onChanged,
+    final theme = Theme.of(context);
+    return ConstrainedBox(
+      constraints: BoxConstraints(minWidth: 120, maxWidth: maxWidth),
+      child: IntrinsicWidth(
+        child: Container(
+          height: 42,
+          padding: const EdgeInsets.only(left: 14, right: 8),
+          decoration: BoxDecoration(
+            color: theme.inputDecorationTheme.fillColor ?? theme.colorScheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(kRadius),
+          ),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<T>(
+              value: value,
+              isExpanded: true,
+              borderRadius: BorderRadius.circular(kRadius),
+              dropdownColor: theme.cardTheme.color,
+              focusColor: Colors.transparent,
+              icon: Icon(Icons.expand_more_rounded, color: theme.colorScheme.onSurfaceVariant),
+              menuMaxHeight: 420,
+              style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w500),
+              items: items,
+              onChanged: onChanged,
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
 
+/// Settings line in the style of a [SwitchListTile]: title and optional
+/// subtitle on the left, a control on the right.
+class SettingRow extends StatelessWidget {
+  const SettingRow({super.key, required this.title, this.subtitle, required this.trailing});
+
+  final String title;
+  final String? subtitle;
+  final Widget trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: theme.textTheme.bodyLarge),
+                if (subtitle != null)
+                  Text(
+                    subtitle!,
+                    style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 16),
+          trailing,
+        ],
+      ),
+    );
+  }
+}
 
 Color stateColor(BuildContext context, DictationState s) => switch (s) {
       DictationState.listening => kListening,
