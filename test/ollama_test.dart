@@ -1,44 +1,105 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:openspeak/core/ollama.dart';
 import 'package:openspeak/core/settings.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// A minimal stand-in for the Ollama API.
-Future<HttpServer> fakeOllama({List<String> models = const [], bool pullFails = false}) async {
+/// A minimal stand-in for the Ollama API, plus a file host for mirror tests
+/// (`/files/<name>`, with Range support; `/files/missing` is a 404).
+class FakeOllama {
+  FakeOllama._(this.server);
+  final HttpServer server;
+  int get port => server.port;
+  final installed = <String>[];
+  final blobs = <String, int>{};
+  final created = <Map>[];
+  final files = <String, List<int>>{};
+  String? pullError;
+
+  Future<void> close() => server.close(force: true);
+}
+
+Future<FakeOllama> fakeOllama({List<String> models = const [], bool pullFails = false}) async {
   final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-  final installed = [...models];
+  final f = FakeOllama._(server)..installed.addAll(models);
+  if (pullFails) f.pullError = 'pull model manifest: file does not exist';
   server.listen((req) async {
     final res = req.response..headers.contentType = ContentType.json;
-    switch (req.uri.path) {
-      case '/api/version':
-        res.write(jsonEncode({'version': '0.40.17'}));
-      case '/api/tags':
-        res.write(jsonEncode({
-          'models': [for (final m in installed) {'name': m}],
-        }));
-      case '/api/pull':
-        final body = jsonDecode(await utf8.decoder.bind(req).join()) as Map;
-        res.headers.contentType = ContentType('application', 'x-ndjson');
-        res.writeln(jsonEncode({'status': 'pulling manifest'}));
-        if (pullFails) {
-          res.writeln(jsonEncode({'error': 'pull model manifest: file does not exist'}));
-        } else {
-          for (final done in [0, 500, 1000]) {
-            res.writeln(jsonEncode({'status': 'pulling abc', 'total': 1000, 'completed': done}));
-            await res.flush();
-          }
-          res.writeln(jsonEncode({'status': 'success'}));
-          installed.add(body['model'] as String);
-        }
-      default:
+    final path = req.uri.path;
+    if (path.startsWith('/files/')) {
+      final data = f.files[path.substring(7)];
+      if (data == null) {
         res.statusCode = 404;
+      } else {
+        final range = RegExp(r'bytes=(\d+)-').firstMatch(req.headers.value('range') ?? '');
+        final from = range == null ? 0 : int.parse(range.group(1)!);
+        if (range != null) res.statusCode = 206;
+        res.headers.contentType = ContentType.binary;
+        res.contentLength = data.length - from;
+        res.add(data.sublist(from));
+      }
+    } else if (path.startsWith('/api/blobs/sha256:')) {
+      final digest = path.substring('/api/blobs/sha256:'.length);
+      if (req.method == 'HEAD') {
+        res.statusCode = f.blobs.containsKey(digest) ? 200 : 404;
+      } else {
+        final body = await req.fold<List<int>>([], (a, b) => a..addAll(b));
+        if (sha256.convert(body).toString() != digest) {
+          res.statusCode = 400;
+          res.write(jsonEncode({'error': 'digest mismatch'}));
+        } else {
+          f.blobs[digest] = body.length;
+          res.statusCode = 201;
+        }
+      }
+    } else {
+      switch (path) {
+        case '/api/version':
+          res.write(jsonEncode({'version': '0.40.17'}));
+        case '/api/tags':
+          res.write(
+            jsonEncode({
+              'models': [
+                for (final m in f.installed) {'name': m},
+              ],
+            }),
+          );
+        case '/api/create':
+          final body = jsonDecode(await utf8.decoder.bind(req).join()) as Map;
+          f.created.add(body);
+          res.headers.contentType = ContentType('application', 'x-ndjson');
+          final missing = (body['files'] as Map).values.any((d) => !f.blobs.containsKey((d as String).substring(7)));
+          if (missing) {
+            res.writeln(jsonEncode({'error': 'blob not found'}));
+          } else {
+            res.writeln(jsonEncode({'status': 'parsing GGUF'}));
+            res.writeln(jsonEncode({'status': 'success'}));
+            f.installed.add('${body['model']}');
+          }
+        case '/api/pull':
+          final body = jsonDecode(await utf8.decoder.bind(req).join()) as Map;
+          res.headers.contentType = ContentType('application', 'x-ndjson');
+          res.writeln(jsonEncode({'status': 'pulling manifest'}));
+          if (f.pullError != null) {
+            res.writeln(jsonEncode({'error': f.pullError}));
+          } else {
+            for (final done in [0, 500, 1000]) {
+              res.writeln(jsonEncode({'status': 'pulling abc', 'total': 1000, 'completed': done}));
+              await res.flush();
+            }
+            res.writeln(jsonEncode({'status': 'success'}));
+            f.installed.add(body['model'] as String);
+          }
+        default:
+          res.statusCode = 404;
+      }
     }
     await res.close();
   });
-  return server;
+  return f;
 }
 
 Future<Settings> settingsFor(int port) async {
@@ -72,7 +133,7 @@ void main() {
     expect(o.hasModel('llama3'), isTrue);
     expect(o.hasModel('qwen3:4b'), isFalse);
     expect(await o.ensureRunning(), isTrue);
-    await server.close(force: true);
+    await server.close();
   });
 
   test('pulls a model with progress', () async {
@@ -83,11 +144,12 @@ void main() {
     o.addListener(() {
       if (o.pulling != null) seen.add(o.pullCompleted);
     });
+    o.mirrors = {}; // registry route only
     expect(await o.pull('qwen2.5:3b'), isTrue);
     expect(o.hasModel('qwen2.5:3b'), isTrue);
     expect(o.pulling, isNull);
     expect(seen.first, 0);
-    await server.close(force: true);
+    await server.close();
   });
 
   test('reports a failed pull', () async {
@@ -95,7 +157,101 @@ void main() {
     final o = OllamaManager(await settingsFor(server.port));
     expect(await o.pull('nope:1b'), isFalse);
     expect(o.error, contains('file does not exist'));
-    await server.close(force: true);
+    await server.close();
+  });
+
+  group('mirror import', () {
+    late FakeOllama server;
+    late OllamaManager o;
+    late Directory tmp;
+    final gguf = List<int>.generate(300 * 1024, (i) => (i * 7) % 251);
+    final digest = sha256.convert(gguf).toString();
+    GgufMirror mirror({String? sha}) => GgufMirror(
+      'Org/Repo',
+      'tiny.gguf',
+      sha ?? digest,
+      gguf.length,
+      urls: [
+        Uri.parse('http://127.0.0.1:${server.port}/files/missing'),
+        Uri.parse('http://127.0.0.1:${server.port}/files/tiny.gguf'),
+      ],
+    );
+
+    setUp(() async {
+      server = await fakeOllama();
+      server.files['tiny.gguf'] = gguf;
+      tmp = await Directory.systemTemp.createTemp('os_import');
+      o = OllamaManager(await settingsFor(server.port))..importDirOverride = tmp.path;
+    });
+    tearDown(() async {
+      await server.close();
+      await tmp.delete(recursive: true);
+    });
+
+    test('downloads from a working mirror, verifies and imports', () async {
+      o.mirrors = {'tiny:1b': mirror()};
+      final stages = <String>{};
+      o.addListener(() => stages.add(o.pullStage));
+      expect(await o.pull('tiny:1b'), isTrue);
+      expect(o.error, isNull);
+      expect(o.hasModel('tiny:1b'), isTrue);
+      expect(server.blobs[digest], gguf.length);
+      expect(server.created.single, {
+        'model': 'tiny:1b',
+        'files': {'tiny.gguf': 'sha256:$digest'},
+        'stream': true,
+      });
+      expect(stages, containsAll(['download', 'verify', 'import']));
+      expect(stages, isNot(contains('registry')));
+      expect(tmp.listSync(), isEmpty); // the GGUF and part files are gone
+    });
+
+    test('resumes a partial download', () async {
+      o.mirrors = {'tiny:1b': mirror()};
+      final part = File('${tmp.path}/tiny.gguf.127.0.0.1.part');
+      await part.writeAsBytes(gguf.sublist(0, 1000));
+      expect(await o.pull('tiny:1b'), isTrue);
+      expect(server.blobs[digest], gguf.length);
+    });
+
+    test('a bad checksum falls back to the registry', () async {
+      o.mirrors = {'tiny:1b': mirror(sha: '0' * 64)};
+      final stages = <String>{};
+      o.addListener(() => stages.add(o.pullStage));
+      expect(await o.pull('tiny:1b'), isTrue);
+      expect(stages, contains('registry'));
+      expect(server.blobs, isEmpty);
+      expect(tmp.listSync(), isEmpty);
+    });
+
+    test('mirrors and registry both failing explain the proxy problem', () async {
+      server.files.clear();
+      server.pullError =
+          'max retries exceeded: Get "https://x.r2.cloudflarestorage.com/...": redirect target not allowed: '
+          'x.r2.cloudflarestorage.com resolves to non-public 198.18.1.63';
+      o.mirrors = {'tiny:1b': mirror()};
+      expect(await o.pull('tiny:1b'), isFalse);
+      expect(o.error, contains('fake-ip'));
+      expect(o.error, contains('HTTP 404'));
+      expect(o.pulling, isNull);
+    });
+  });
+
+  test('pull error text', () {
+    expect(OllamaManager.pullErrorText('file does not exist', null), contains('Ollama: file does not exist'));
+    expect(
+      OllamaManager.pullErrorText('resolves to non-public 198.18.0.5', 'timeout'),
+      allOf(contains('r2.cloudflarestorage.com'), contains('timeout')),
+    );
+  });
+
+  test('catalog entries point at the official GGUF releases', () {
+    for (final m in kGgufMirrors.values) {
+      expect(m.sha256, matches(RegExp(r'^[0-9a-f]{64}$')));
+      expect(m.urls.first.host, 'modelscope.cn');
+      expect(m.urls.map((u) => u.path.endsWith(m.file)), everyElement(isTrue));
+    }
+    expect(kGgufMirrors, contains(kRecommendedOllamaModel));
   });
 
   test('nothing listening: missing / stopped locally, remote otherwise', () async {
@@ -114,7 +270,10 @@ void main() {
   });
 
   test('install folder helpers', () {
-    expect(OllamaManager.managedExe('/x/ollama'), Platform.isWindows ? r'/x/ollama\ollama.exe' : '/x/ollama/bin/ollama');
+    expect(
+      OllamaManager.managedExe('/x/ollama'),
+      Platform.isWindows ? r'/x/ollama\ollama.exe' : '/x/ollama/bin/ollama',
+    );
     expect(OllamaManager.defaultDir, contains(Platform.isWindows ? 'OpenSpeak' : 'openspeak'));
   });
 

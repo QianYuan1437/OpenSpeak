@@ -4,8 +4,10 @@ import 'dart:io';
 import 'dart:isolate';
 
 import 'package:archive/archive_io.dart' show extractFileToDisk;
+import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 
 import 'audio_capture.dart' show isDesktop;
 import 'model_manager.dart' show DownloadCancelled, DownloadProgress;
@@ -266,29 +268,45 @@ class OllamaManager extends ChangeNotifier {
 
   // Install ---------------------------------------------------------------------
 
-  String get _archiveName => Platform.isWindows ? 'ollama-windows-amd64.zip' : 'ollama-linux-amd64.tar.zst';
-
-  /// Official download first; on Linux ModelScope's mirror of the same
-  /// package if GitHub is too slow (common in mainland China).
-  List<Uri> get _sources => [
-    Uri.parse('https://ollama.com/download/$_archiveName'),
-    if (Platform.isLinux)
-      Uri.parse('https://modelscope.cn/models/modelscope/ollama-linux/resolve/master/$_archiveName'),
-  ];
+  /// Where the program can come from, in order: the official portable build
+  /// (ollama.com → GitHub), then a mirror in mainland China when GitHub is
+  /// slow or unreachable. Every file is verified before use.
+  List<_ProgramSource> get _sources => Platform.isWindows
+      ? [
+          _ProgramSource(Uri.parse('https://ollama.com/download/ollama-windows-amd64.zip'), 'ollama-windows-amd64.zip'),
+          // No mirror carries the zip; this is the official signed installer
+          // (re-hosted on ModelScope), accepted only with Ollama's signature.
+          _ProgramSource(
+            Uri.parse('https://modelscope.cn/models/Liangdi/ollama-windows-release/resolve/master/OllamaSetup.exe'),
+            'OllamaSetup.exe',
+            installer: true,
+          ),
+        ]
+      : [
+          _ProgramSource(
+            Uri.parse('https://ollama.com/download/ollama-linux-amd64.tar.zst'),
+            'ollama-linux-amd64.tar.zst',
+          ),
+          _ProgramSource(
+            Uri.parse('https://modelscope.cn/models/modelscope/ollama-linux/resolve/master/ollama-linux-amd64.tar.zst'),
+            'ollama-linux-amd64.tar.zst',
+            modelScopeRepo: 'modelscope/ollama-linux',
+          ),
+        ];
 
   /// Bytes of a paused install already on disk.
   int get partialBytes {
     final dir = pendingDir;
     if (dir == null) return 0;
     var n = 0;
-    for (final u in _sources) {
-      final f = File(_partPath(dir, u));
+    for (final s in _sources) {
+      final f = File(_partPath(dir, s.file, s.url));
       if (f.existsSync()) n = n > f.lengthSync() ? n : f.lengthSync();
     }
     return n;
   }
 
-  String _partPath(String dir, Uri source) => p.join(dir, '$_archiveName.${source.host}.part');
+  static String _partPath(String dir, String file, Uri source) => p.join(dir, '$file.${source.host}.part');
 
   void pause() => _cancel = true;
 
@@ -315,13 +333,13 @@ class OllamaManager extends ChangeNotifier {
   Future<void> _deleteParts() async {
     final dir = pendingDir;
     if (dir == null) return;
-    for (final u in _sources) {
-      final f = File(_partPath(dir, u));
+    for (final s in _sources) {
+      final f = File(_partPath(dir, s.file, s.url));
       if (await f.exists()) await f.delete();
     }
   }
 
-  /// Downloads and unpacks Ollama into [dir], starts it and (optionally)
+  /// Downloads and installs Ollama into [dir], starts it and (optionally)
   /// pulls [model]. Resumable: calling it again continues a paused download.
   Future<void> install(String dir, {String? model}) async {
     if (installing) return;
@@ -335,14 +353,33 @@ class OllamaManager extends ChangeNotifier {
     try {
       await Directory(dir).create(recursive: true);
       await File(p.join(dir, marker)).writeAsString('Ollama installed by OpenSpeak\n');
-      final archive = File(p.join(dir, _archiveName));
-      await _download(dir, archive);
+      final sources = _sources;
+      final (used, chain) = await _downloadAny(
+        [for (final s in sources) s.url],
+        dir,
+        (u) => sources.firstWhere((s) => s.url == u).file,
+        onProgress: (host, got, total) {
+          progress = DownloadProgress(got, total > 0 ? total : ollamaPackageBytes, 'download', source: host);
+          notifyListeners();
+        },
+        cancelled: () => _cancel,
+      );
+      final src = sources.firstWhere((s) => s.url == used);
+      final file = File(p.join(dir, src.file));
       progress = const DownloadProgress(0, 0, 'extract');
       notifyListeners();
-      await _extract(archive.path, dir);
-      await archive.delete();
+      try {
+        await _verifyProgram(src, file, chain);
+        if (src.installer) {
+          await _runInstaller(file, dir);
+        } else {
+          await _extract(file.path, dir);
+        }
+      } finally {
+        if (await file.exists()) await file.delete();
+      }
       final path = managedExe(dir);
-      if (!await File(path).exists()) throw Exception('ollama not found after unpacking');
+      if (!await File(path).exists()) throw Exception('ollama not found after installing');
       if (!Platform.isWindows) await Process.run('chmod', ['+x', path]);
       await settings.update((s) => s.ollamaDir = dir);
       exe = path;
@@ -350,7 +387,14 @@ class OllamaManager extends ChangeNotifier {
       installing = false;
       progress = null;
       notifyListeners();
-      if (await start() && model != null) await pull(model);
+      // The Windows installer may already have started Ollama.
+      var up = await _version() != null;
+      if (up) {
+        await refresh();
+      } else {
+        up = await start();
+      }
+      if (up && model != null) await pull(model);
     } on DownloadCancelled {
       if (_discard) {
         await _deleteParts();
@@ -370,17 +414,124 @@ class OllamaManager extends ChangeNotifier {
     if (pendingDir != null) await install(pendingDir!, model: _pendingModel);
   }
 
-  Future<void> _download(String dir, File dest) async {
-    if (await dest.exists()) return;
+  /// Official files are checked against the release's sha256sum.txt,
+  /// ModelScope files against ModelScope's listing, and the Windows
+  /// installer by its Authenticode signature (it must be Ollama's).
+  Future<void> _verifyProgram(_ProgramSource src, File file, List<Uri> chain) async {
+    if (src.installer) {
+      final path = file.path.replaceAll("'", "''");
+      final r = await Process.run('powershell', [
+        '-NoProfile',
+        '-Command',
+        "\$s = Get-AuthenticodeSignature -LiteralPath '$path'; \"\$(\$s.Status)|\$(\$s.SignerCertificate.Subject)\"",
+      ]);
+      final out = r.stdout.toString().trim();
+      if (!out.startsWith('Valid|') || !out.toLowerCase().contains('ollama')) {
+        throw Exception('安装包签名校验未通过 / installer signature check failed ($out)');
+      }
+      return;
+    }
+    String? expected;
+    try {
+      if (src.modelScopeRepo != null) {
+        expected = await _modelScopeSha256(src.modelScopeRepo!, src.file);
+      } else {
+        // ollama.com → github.com/…/releases/latest/download/<file> →
+        // …/releases/download/<tag>/<file>: the tagged URL pins the release.
+        final release = chain.lastWhere((u) => u.host == 'github.com' && u.path.contains('/download/'));
+        final sums = await _getText(release.resolve('sha256sum.txt'));
+        for (final line in sums.split('\n')) {
+          final parts = line.trim().split(RegExp(r'\s+'));
+          if (parts.length == 2 && p.basename(parts[1]) == src.file) expected = parts[0];
+        }
+      }
+    } catch (_) {
+      // Checksum list unreachable: the download itself came over HTTPS from
+      // the publisher, so carry on.
+    }
+    if (expected == null) return;
+    final actual = await _sha256(file);
+    if (actual != expected.toLowerCase()) {
+      throw Exception('文件校验失败，已删除，请重试 / checksum mismatch, file deleted — try again');
+    }
+  }
+
+  Future<String?> _modelScopeSha256(String repo, String file) async {
+    final body = await _getText(Uri.parse('https://www.modelscope.cn/api/v1/models/$repo/repo/files?Revision=master'));
+    for (final f in ((jsonDecode(body) as Map)['Data'] as Map)['Files'] as List) {
+      if ((f as Map)['Name'] == file) return (f['Sha256'] as String?)?.toLowerCase();
+    }
+    return null;
+  }
+
+  /// Runs the official installer silently into [dir] with the models kept
+  /// there too (also for the Ollama app that starts at sign-in).
+  Future<void> _runInstaller(File setup, String dir) async {
+    final models = p.join(dir, 'models');
+    progress = const DownloadProgress(0, 0, 'install');
+    notifyListeners();
+    final r = await Process.run(
+      setup.path,
+      ['/DIR=$dir', '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-'],
+      environment: {'OLLAMA_MODELS': models},
+    );
+    if (r.exitCode != 0) throw Exception('installer exit code ${r.exitCode}');
+    await Process.run('setx', ['OLLAMA_MODELS', models]);
+  }
+
+  HttpClient _client() => HttpClient()
+    ..connectionTimeout = const Duration(seconds: 15)
+    ..findProxy = HttpClient.findProxyFromEnvironment
+    ..userAgent = 'OpenSpeak';
+
+  Future<String> _getText(Uri url) async {
+    final c = _client();
+    try {
+      final req = await c.getUrl(url);
+      final res = await req.close().timeout(const Duration(seconds: 20));
+      final body = await res.transform(utf8.decoder).join();
+      if (res.statusCode >= 400) throw HttpException('HTTP ${res.statusCode}', uri: url);
+      return body;
+    } finally {
+      c.close(force: true);
+    }
+  }
+
+  static Future<String> _sha256(File f) async => (await sha256.bind(f.openRead()).first).toString();
+
+  /// Downloads from the first source that is fast enough into
+  /// `dir/<name(url)>`; a second pass accepts any speed. Each source resumes
+  /// its own `.part` (mirrors may serve different builds). Returns the source
+  /// used and the redirect chain it went through.
+  Future<(Uri, List<Uri>)> _downloadAny(
+    List<Uri> urls,
+    String dir,
+    String Function(Uri url) name, {
+    required void Function(String host, int got, int total) onProgress,
+    required bool Function() cancelled,
+    int fastEnough = 1024 * 1024,
+  }) async {
     Object? lastError;
-    final sources = _sources;
     for (final strict in [true, false]) {
-      for (final url in sources) {
+      for (final url in urls) {
+        final file = name(url);
+        final part = File(_partPath(dir, file, url));
         try {
-          await _fetch(url, File(_partPath(dir, url)), minRate: strict && sources.length > 1 ? 1024 * 1024 : 0);
-          await File(_partPath(dir, url)).rename(dest.path);
-          await _deleteParts(); // other mirrors' leftovers
-          return;
+          final chain = await _fetch(
+            url,
+            part,
+            minRate: strict && urls.length > 1 ? fastEnough : 0,
+            onProgress: (got, total) => onProgress(url.host, got, total),
+            cancelled: cancelled,
+          );
+          final dest = File(p.join(dir, file));
+          if (await dest.exists()) await dest.delete();
+          await part.rename(dest.path);
+          for (final other in urls) {
+            final f = File(_partPath(dir, name(other), other));
+            if (await f.exists()) await f.delete();
+          }
+          return (url, chain);
         } on DownloadCancelled {
           rethrow;
         } catch (e) {
@@ -391,15 +542,17 @@ class OllamaManager extends ChangeNotifier {
     throw lastError!;
   }
 
-  HttpClient _client() => HttpClient()
-    ..connectionTimeout = const Duration(seconds: 15)
-    ..findProxy = HttpClient.findProxyFromEnvironment
-    ..userAgent = 'OpenSpeak';
-
   /// Resumable GET into [part]; redirects are followed by hand so the Range
-  /// header survives the hop to GitHub's CDN.
-  Future<void> _fetch(Uri url, File part, {int minRate = 0}) async {
+  /// header survives CDN hops. Returns the URLs visited.
+  Future<List<Uri>> _fetch(
+    Uri url,
+    File part, {
+    int minRate = 0,
+    required void Function(int got, int total) onProgress,
+    required bool Function() cancelled,
+  }) async {
     var have = await part.exists() ? await part.length() : 0;
+    final chain = <Uri>[url];
     final c = _client();
     try {
       var u = url;
@@ -414,6 +567,7 @@ class OllamaManager extends ChangeNotifier {
           await r.drain<void>();
           if (loc == null) break;
           u = u.resolve(loc);
+          chain.add(u);
           continue;
         }
         res = r;
@@ -422,14 +576,14 @@ class OllamaManager extends ChangeNotifier {
       if (res == null) throw HttpException('too many redirects', uri: url);
       if (res.statusCode == 416) {
         await res.drain<void>();
-        return;
+        return chain;
       }
       if (res.statusCode >= 400) {
         await res.drain<void>();
         throw HttpException('HTTP ${res.statusCode}', uri: url);
       }
       if (res.statusCode != 206) have = 0;
-      final total = res.contentLength > 0 ? have + res.contentLength : ollamaPackageBytes;
+      final total = res.contentLength > 0 ? have + res.contentLength : 0;
       final sink = part.openWrite(mode: have > 0 ? FileMode.append : FileMode.write);
       var got = have;
       var last = DateTime.now();
@@ -437,14 +591,13 @@ class OllamaManager extends ChangeNotifier {
       var windowBytes = got;
       try {
         await for (final chunk in res.timeout(const Duration(seconds: 30))) {
-          if (_cancel) throw DownloadCancelled();
+          if (cancelled()) throw DownloadCancelled();
           sink.add(chunk);
           got += chunk.length;
           final now = DateTime.now();
           if (now.difference(last).inMilliseconds > 250) {
             last = now;
-            progress = DownloadProgress(got, total, 'download', source: url.host);
-            notifyListeners();
+            onProgress(got, total);
           }
           if (now.difference(windowStart) >= const Duration(seconds: 12)) {
             final rate = (got - windowBytes) / now.difference(windowStart).inSeconds;
@@ -455,6 +608,9 @@ class OllamaManager extends ChangeNotifier {
       } finally {
         await sink.close();
       }
+      if (total > 0 && got < total) throw Exception('${url.host}: connection closed early');
+      onProgress(got, total);
+      return chain;
     } finally {
       c.close(force: true);
     }
@@ -478,7 +634,18 @@ class OllamaManager extends ChangeNotifier {
     error = null;
     try {
       if (Platform.isWindows) {
+        await Process.run('taskkill', ['/F', '/IM', 'ollama app.exe']);
         await Process.run('taskkill', ['/F', '/IM', 'ollama.exe']);
+        // Installed with the official installer (mirror route): use its
+        // uninstaller so shortcuts and the Apps entry go too.
+        final unins = File(p.join(dir, 'unins000.exe'));
+        if (await unins.exists()) {
+          await Process.run(unins.path, ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART']);
+          final q = await Process.run('reg', ['query', r'HKCU\Environment', '/v', 'OLLAMA_MODELS']);
+          if (q.stdout.toString().contains(p.join(dir, 'models'))) {
+            await Process.run('reg', ['delete', r'HKCU\Environment', '/v', 'OLLAMA_MODELS', '/f']);
+          }
+        }
       } else {
         await Process.run('pkill', ['-f', managedExe(dir)]);
       }
@@ -498,6 +665,7 @@ class OllamaManager extends ChangeNotifier {
       if (Platform.isWindows) 'ollama.exe' else p.join('bin', 'ollama'),
       p.join('lib', 'ollama'),
       'models',
+      'downloads',
       marker,
       'ollama-windows-amd64.zip',
       'ollama-linux-amd64.tar.zst',
@@ -514,7 +682,8 @@ class OllamaManager extends ChangeNotifier {
     final d = Directory(dir);
     if (!await d.exists()) return;
     await for (final e in d.list()) {
-      if (p.basename(e.path).startsWith('ollama-') && p.basename(e.path).endsWith('.part')) await e.delete();
+      final n = p.basename(e.path);
+      if ((n.startsWith('ollama-') || n.startsWith('OllamaSetup')) && n.endsWith('.part')) await e.delete();
     }
     // bin/ and lib/ only if they are now empty; then the folder likewise.
     for (final sub in ['bin', 'lib', '']) {
@@ -525,57 +694,207 @@ class OllamaManager extends ChangeNotifier {
 
   // Models ----------------------------------------------------------------------
 
-  /// Downloads [model] through the running Ollama (`/api/pull`, resumable).
+  /// What [pull] is doing: 'download' (GGUF from a mirror), 'verify',
+  /// 'import' (upload to Ollama), 'registry' (Ollama's own pull).
+  String pullStage = '';
+  String? pullSource;
+  bool _pullCancelled = false;
+
+  /// Models that [pull] fetches from the mirrors; overridable in tests.
+  @visibleForTesting
+  Map<String, GgufMirror> mirrors = kGgufMirrors;
+
+  /// Where mirror downloads wait before being imported; overridable in tests.
+  @visibleForTesting
+  String? importDirOverride;
+
+  Future<String> _importDir() async {
+    if (importDirOverride != null) return importDirOverride!;
+    if (managed) return p.join(settings.ollamaDir, 'downloads');
+    return p.join((await getApplicationCacheDirectory()).path, 'ollama-import');
+  }
+
+  /// Gets [model] into Ollama. Known models come as GGUF files from mirrors
+  /// (ModelScope, hf-mirror, HuggingFace) that OpenSpeak downloads, checks
+  /// and imports itself: Ollama's own download follows redirects to
+  /// Cloudflare R2, which fails behind "fake-IP" proxies (non-public address)
+  /// and is often slow in mainland China. Ollama's registry is the fallback,
+  /// and the only route for other models.
   Future<bool> pull(String model) async {
-    if (pulling != null) return false;
-    pulling = model;
+    final name = model.trim();
+    if (pulling != null || name.isEmpty) return false;
+    pulling = name;
     pullStatus = '';
+    pullStage = '';
+    pullSource = null;
     pullCompleted = pullTotal = 0;
+    _pullCancelled = false;
     error = null;
     notifyListeners();
-    final c = _pullClient = _client();
-    var last = DateTime(0);
     try {
-      final req = await c.postUrl(apiBase.replace(path: '/api/pull'));
-      req.headers.contentType = ContentType.json;
-      req.write(jsonEncode({'model': model, 'stream': true}));
-      final res = await req.close();
-      if (res.statusCode != 200) {
-        throw HttpException('HTTP ${res.statusCode}: ${await res.transform(utf8.decoder).join()}');
-      }
-      await for (final line in res.transform(utf8.decoder).transform(const LineSplitter())) {
-        if (line.trim().isEmpty) continue;
-        final j = jsonDecode(line) as Map;
-        if (j['error'] != null) throw Exception(j['error']);
-        pullStatus = '${j['status'] ?? ''}';
-        if (j['total'] is int) {
-          pullTotal = j['total'] as int;
-          pullCompleted = j['completed'] as int? ?? 0;
-        }
-        final now = DateTime.now();
-        if (now.difference(last).inMilliseconds > 250) {
-          last = now;
-          notifyListeners();
+      String? mirrorError;
+      final mirror = mirrors[name];
+      if (mirror != null) {
+        try {
+          await _importGguf(name, mirror);
+          models = await _tags();
+          if (hasModel(name)) return true;
+        } on DownloadCancelled {
+          return false;
+        } catch (e) {
+          if (_pullCancelled) return false;
+          mirrorError = '$e';
         }
       }
-      models = await _tags();
-      return hasModel(model);
-    } catch (e) {
-      if (_pullClient != null) error = '模型下载失败 / Model download failed: $e';
-      return false;
+      try {
+        await _registryPull(name);
+        models = await _tags();
+        return hasModel(name);
+      } catch (e) {
+        if (_pullCancelled) return false;
+        error = pullErrorText('$e', mirrorError);
+        return false;
+      }
     } finally {
+      _pullClient?.close(force: true);
       _pullClient = null;
-      c.close(force: true);
       pulling = null;
+      pullStage = '';
       notifyListeners();
     }
   }
 
-  /// Stops a model download; Ollama keeps the part for next time.
+  /// User-facing reason for a failed model download.
+  @visibleForTesting
+  static String pullErrorText(String registryError, String? mirrorError) {
+    final blocked = registryError.contains('non-public') || registryError.contains('redirect target not allowed');
+    return [
+      '模型下载失败 / Model download failed',
+      if (mirrorError != null) '镜像 / mirrors: $mirrorError',
+      if (blocked)
+        'Ollama 官方仓库的下载地址被代理软件解析成了内网地址（如 198.18.x.x，常见于 Clash 等的 fake-ip 模式），Ollama 出于安全拒绝连接。'
+            '请把 r2.cloudflarestorage.com 设为直连或关闭 fake-ip 后重试，或改用推荐模型（走国内镜像）。'
+            ' / A proxy maps Ollama\'s download host to a private address (fake-IP mode); allow r2.cloudflarestorage.com directly or use the recommended model (mirrored).'
+      else
+        'Ollama: $registryError',
+    ].join('\n');
+  }
+
+  void _pullProgress(String stage, int done, int total, {String? source}) {
+    pullStage = stage;
+    pullCompleted = done;
+    pullTotal = total;
+    if (source != null) pullSource = source;
+    notifyListeners();
+  }
+
+  Future<void> _importGguf(String model, GgufMirror m) async {
+    final dir = await _importDir();
+    await Directory(dir).create(recursive: true);
+    final gguf = File(p.join(dir, m.file));
+    if (!(await gguf.exists() && await gguf.length() == m.size)) {
+      await _downloadAny(
+        m.urls,
+        dir,
+        (_) => m.file,
+        onProgress: (host, got, _) => _pullProgress('download', got, m.size, source: host),
+        cancelled: () => _pullCancelled,
+        fastEnough: 512 * 1024,
+      );
+    }
+    _pullProgress('verify', 0, 0);
+    final digest = await _sha256(gguf);
+    if (digest != m.sha256) {
+      await gguf.delete();
+      throw Exception('checksum mismatch (${m.file})');
+    }
+    if (_pullCancelled) throw DownloadCancelled();
+    await _pushBlob(gguf, digest);
+    await _createModel(model, m.file, digest);
+    await gguf.delete();
+  }
+
+  /// Uploads [f] to Ollama's blob store unless it is there already.
+  Future<void> _pushBlob(File f, String digest) async {
+    final url = apiBase.replace(path: '/api/blobs/sha256:$digest');
+    final c = _pullClient = _client();
+    final head = await (await c.openUrl('HEAD', url)).close();
+    await head.drain<void>();
+    if (head.statusCode == 200) return;
+    final size = await f.length();
+    final req = await c.postUrl(url);
+    req.contentLength = size;
+    req.headers.contentType = ContentType.binary;
+    var sent = 0;
+    var last = DateTime(0);
+    await req.addStream(
+      f.openRead().map((chunk) {
+        if (_pullCancelled) throw DownloadCancelled();
+        sent += chunk.length;
+        final now = DateTime.now();
+        if (now.difference(last).inMilliseconds > 250) {
+          last = now;
+          _pullProgress('import', sent, size);
+        }
+        return chunk;
+      }),
+    );
+    final res = await req.close();
+    final body = await res.transform(utf8.decoder).join();
+    if (res.statusCode != 200 && res.statusCode != 201) {
+      throw HttpException('blob upload: HTTP ${res.statusCode} $body');
+    }
+  }
+
+  Future<void> _createModel(String model, String file, String digest) async {
+    _pullProgress('import', 1, 1);
+    await _streamCall('/api/create', {
+      'model': model,
+      'files': {file: 'sha256:$digest'},
+      'stream': true,
+    });
+  }
+
+  Future<void> _registryPull(String model) async {
+    _pullProgress('registry', 0, 0, source: 'registry.ollama.ai');
+    await _streamCall(
+      '/api/pull',
+      {'model': model, 'stream': true},
+      onLine: (j) {
+        pullStatus = '${j['status'] ?? ''}';
+        if (j['total'] is int) _pullProgress('registry', j['completed'] as int? ?? 0, j['total'] as int);
+      },
+    );
+  }
+
+  /// POSTs [body] to an Ollama endpoint that answers with NDJSON progress
+  /// lines; an `error` line becomes an exception.
+  Future<void> _streamCall(String path, Map<String, Object> body, {void Function(Map j)? onLine}) async {
+    final c = _pullClient = _client();
+    final req = await c.postUrl(apiBase.replace(path: path));
+    req.headers.contentType = ContentType.json;
+    req.write(jsonEncode(body));
+    final res = await req.close();
+    if (res.statusCode != 200) {
+      throw HttpException('HTTP ${res.statusCode}: ${await res.transform(utf8.decoder).join()}');
+    }
+    var last = DateTime(0);
+    await for (final line in res.transform(utf8.decoder).transform(const LineSplitter())) {
+      if (line.trim().isEmpty) continue;
+      final j = jsonDecode(line) as Map;
+      if (j['error'] != null) throw Exception(j['error']);
+      final now = DateTime.now();
+      if (now.difference(last).inMilliseconds > 250) {
+        last = now;
+        onLine?.call(j);
+      }
+    }
+  }
+
+  /// Stops a model download; partial files are kept for next time.
   void cancelPull() {
-    final c = _pullClient;
-    _pullClient = null;
-    c?.close(force: true);
+    _pullCancelled = true;
+    _pullClient?.close(force: true);
   }
 
   /// Free bytes on the drive that would hold [dir] (null if unknown).
@@ -602,3 +921,50 @@ class OllamaManager extends ChangeNotifier {
     }
   }
 }
+
+class _ProgramSource {
+  const _ProgramSource(this.url, this.file, {this.installer = false, this.modelScopeRepo});
+  final Uri url;
+
+  /// Name of the downloaded file in the install folder.
+  final String file;
+
+  /// An installer to run (Windows mirror) rather than an archive to unpack.
+  final bool installer;
+
+  /// ModelScope repo whose file listing holds the expected SHA-256.
+  final String? modelScopeRepo;
+}
+
+/// A model's GGUF file as published by its authors, mirrored in China.
+class GgufMirror {
+  const GgufMirror(this.repo, this.file, this.sha256, this.size, {List<Uri>? urls}) : _urls = urls;
+  final String repo, file, sha256;
+  final int size;
+  final List<Uri>? _urls;
+
+  List<Uri> get urls =>
+      _urls ??
+      [
+        Uri.parse('https://modelscope.cn/models/$repo/resolve/master/$file'),
+        Uri.parse('https://hf-mirror.com/$repo/resolve/main/$file'),
+        Uri.parse('https://huggingface.co/$repo/resolve/main/$file'),
+      ];
+}
+
+/// Ollama model names that can be fetched from the mirrors (official Qwen
+/// GGUF releases, Q4_K_M like Ollama's own tags).
+const kGgufMirrors = {
+  'qwen2.5:3b': GgufMirror(
+    'Qwen/Qwen2.5-3B-Instruct-GGUF',
+    'qwen2.5-3b-instruct-q4_k_m.gguf',
+    '626b4a6678b86442240e33df819e00132d3ba7dddfe1cdc4fbb18e0a9615c62d',
+    2104932768,
+  ),
+  'qwen2.5:1.5b': GgufMirror(
+    'Qwen/Qwen2.5-1.5B-Instruct-GGUF',
+    'qwen2.5-1.5b-instruct-q4_k_m.gguf',
+    '6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e',
+    1117320736,
+  ),
+};

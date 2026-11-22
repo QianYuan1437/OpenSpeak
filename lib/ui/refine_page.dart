@@ -702,6 +702,14 @@ class _RefinePageState extends State<RefinePage> {
 
   // Ollama -----------------------------------------------------------------------
 
+  String _pullStageText() => switch (ollama.pullStage) {
+    'download' => '${t('从镜像下载', 'Downloading from')} ${ollama.pullSource ?? ''}',
+    'verify' => t('校验文件…', 'Verifying…'),
+    'import' => t('导入 Ollama…', 'Importing into Ollama…'),
+    'registry' => t('Ollama 官方仓库', 'Ollama registry'),
+    _ => '',
+  };
+
   Widget _ollamaPanel(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final s = ollama.status;
@@ -754,12 +762,14 @@ class _RefinePageState extends State<RefinePage> {
     const ok = Colors.green;
 
     if (ollama.installing || ollama.pendingDir != null) {
-      final extracting = pr?.stage == 'extract';
+      final extracting = pr?.stage == 'extract' || pr?.stage == 'install';
       return panel(
         Icons.downloading_rounded,
         scheme.primary,
-        extracting
-            ? t('正在解压 Ollama…', 'Unpacking Ollama…')
+        pr?.stage == 'install'
+            ? t('正在安装 Ollama…', 'Installing Ollama…')
+            : extracting
+            ? t('正在校验并解压 Ollama…', 'Verifying and unpacking Ollama…')
             : ollama.installing
             ? t('正在下载 Ollama', 'Downloading Ollama')
             : t('Ollama 下载已暂停', 'Ollama download paused'),
@@ -812,7 +822,14 @@ class _RefinePageState extends State<RefinePage> {
                 children: [
                   Expanded(
                     child: Text(
-                      '${ollama.pulling} · ${ollama.pullTotal > 0 ? '${formatBytes(ollama.pullCompleted)} / ${formatBytes(ollama.pullTotal)}' : ollama.pullStatus}',
+                      [
+                        ollama.pulling,
+                        _pullStageText(),
+                        if (ollama.pullTotal > 0)
+                          '${formatBytes(ollama.pullCompleted)} / ${formatBytes(ollama.pullTotal)}'
+                        else if (ollama.pullStatus.isNotEmpty)
+                          ollama.pullStatus,
+                      ].whereType<String>().where((x) => x.isNotEmpty).join(' · '),
                       style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
                     ),
                   ),
