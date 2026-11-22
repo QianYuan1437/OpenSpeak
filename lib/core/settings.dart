@@ -122,6 +122,16 @@ class Settings extends ChangeNotifier {
   String llmPrompt = '';
   int llmTimeoutSec = 8;
 
+  /// Folder of the Ollama that OpenSpeak installed ('' if none).
+  String ollamaDir = '';
+
+  /// Start an installed but stopped Ollama when the AI needs it.
+  bool ollamaAutoStart = true;
+
+  /// An unfinished Ollama install: folder and model to pull afterwards.
+  String ollamaPendingDir = '';
+  String ollamaPendingModel = '';
+
   /// Per provider: {baseUrl, model, apiKey}, so switching keeps each key.
   Map<String, Map<String, String>> llmEndpoints = {};
 
@@ -224,6 +234,10 @@ class Settings extends ChangeNotifier {
       llmMode = LlmMode.values.byName(m['llmMode'] as String? ?? 'correct');
       llmPrompt = m['llmPrompt'] as String? ?? llmPrompt;
       llmTimeoutSec = m['llmTimeoutSec'] as int? ?? llmTimeoutSec;
+      ollamaDir = m['ollamaDir'] as String? ?? ollamaDir;
+      ollamaAutoStart = m['ollamaAutoStart'] as bool? ?? ollamaAutoStart;
+      ollamaPendingDir = m['ollamaPendingDir'] as String? ?? '';
+      ollamaPendingModel = m['ollamaPendingModel'] as String? ?? '';
       llmEndpoints = {
         for (final e in (m['llmEndpoints'] as Map? ?? const {}).entries)
           e.key as String: (e.value as Map).map((k, v) => MapEntry(k as String, v as String)),
@@ -278,6 +292,10 @@ class Settings extends ChangeNotifier {
         'llmMode': llmMode.name,
         'llmPrompt': llmPrompt,
         'llmTimeoutSec': llmTimeoutSec,
+        'ollamaDir': ollamaDir,
+        'ollamaAutoStart': ollamaAutoStart,
+        'ollamaPendingDir': ollamaPendingDir,
+        'ollamaPendingModel': ollamaPendingModel,
         'llmEndpoints': llmEndpoints,
       };
 }

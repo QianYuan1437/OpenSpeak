@@ -7,6 +7,7 @@ import 'core/audio_capture.dart' show isDesktop;
 import 'core/dictation.dart';
 import 'core/gpu.dart';
 import 'core/model_manager.dart';
+import 'core/ollama.dart';
 import 'core/perf_monitor.dart';
 import 'core/settings.dart';
 import 'core/updater.dart';
@@ -27,7 +28,8 @@ Future<void> main(List<String> args) async {
   await models.init();
   gpu = GpuManager();
   await gpu.init();
-  dictation = Dictation(settings, models, gpu);
+  ollama = OllamaManager(settings);
+  dictation = Dictation(settings, models, gpu, ollama);
   perf = PerfMonitor(gpu);
   updater = Updater(kRepo, kAppVersion);
   final installGpu = args.contains('--install-gpu') && gpu.available && !gpu.ready;

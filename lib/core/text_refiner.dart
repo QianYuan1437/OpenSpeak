@@ -276,8 +276,11 @@ const kPolishExamples = [
 
 /// Why an AI result was not used.
 class LlmException implements Exception {
-  const LlmException(this.message);
+  const LlmException(this.message, {this.unreachable = false});
   final String message;
+
+  /// Nothing answered at the address (service not running / wrong URL).
+  final bool unreachable;
   @override
   String toString() => message;
 }
@@ -412,7 +415,7 @@ class LlmRefiner {
     } on TimeoutException {
       throw LlmException('超时（${c.timeout.inSeconds} 秒）/ Timed out');
     } catch (e) {
-      throw LlmException('无法连接 / Cannot connect: $e');
+      throw LlmException('无法连接 / Cannot connect: $e', unreachable: true);
     }
     final body = utf8.decode(res.bodyBytes);
     if (res.statusCode != 200) {
@@ -506,7 +509,8 @@ class LlmRefiner {
 
 /// Outcome of the whole pipeline, for history and the try-it panel.
 class RefineResult {
-  const RefineResult(this.text, {required this.raw, this.usedLlm = false, this.llmError, this.llmMs});
+  const RefineResult(this.text,
+      {required this.raw, this.usedLlm = false, this.llmError, this.llmUnreachable = false, this.llmMs});
   final String text;
 
   /// The recognizer's text without refinement (Traditional→Simplified and
@@ -514,5 +518,8 @@ class RefineResult {
   final String raw;
   final bool usedLlm;
   final String? llmError;
+
+  /// The AI service did not answer at all (see [LlmException.unreachable]).
+  final bool llmUnreachable;
   final int? llmMs;
 }

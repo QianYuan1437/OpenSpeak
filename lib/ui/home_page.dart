@@ -6,7 +6,9 @@ import 'package:flutter/services.dart';
 import '../app_state.dart';
 import '../core/dictation.dart';
 import '../core/model_catalog.dart';
+import '../core/ollama.dart';
 import '../core/settings.dart';
+import '../core/text_refiner.dart';
 import 'home_shell.dart';
 import 'i18n.dart';
 import 'theme.dart';
@@ -14,10 +16,11 @@ import 'perf_card.dart';
 import 'widgets.dart';
 
 class HomePage extends StatefulWidget {
-  const HomePage({super.key, required this.onOpenModels, required this.onOpenSettings});
+  const HomePage({super.key, required this.onOpenModels, required this.onOpenSettings, required this.onOpenRefine});
 
   final VoidCallback onOpenModels;
   final VoidCallback onOpenSettings;
+  final VoidCallback onOpenRefine;
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -75,7 +78,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: Listenable.merge([dictation, models, settings]),
+      listenable: Listenable.merge([dictation, models, settings, ollama]),
       builder: (context, _) {
         final spec = dictation.currentModel;
         final installed = spec != null && models.isInstalled(spec);
@@ -121,7 +124,31 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               '${settings.trigger == TriggerMode.hold ? t('按住', 'Hold') : t('按下切换', 'Toggle')} ${settings.hotkey.label}',
           onTap: widget.onOpenSettings,
         ),
+      if (settings.llmEnabled) _aiChip(context),
     ]);
+  }
+
+  /// AI correction status; red when the local Ollama is not usable.
+  Widget _aiChip(BuildContext context) {
+    final local = llmProviderById(settings.llmProvider).local;
+    final model = settings.endpointOf(settings.llmProvider).model;
+    final s = ollama.status;
+    final bad = local && s != OllamaStatus.running && s != OllamaStatus.unknown;
+    final missingModel = local && s == OllamaStatus.running && !ollama.hasModel(model);
+    return InfoChip(
+      icon: Icons.auto_fix_high_rounded,
+      label: bad
+          ? switch (s) {
+              OllamaStatus.missing => t('AI 优化不可用：未安装 Ollama', 'AI off: Ollama not installed'),
+              OllamaStatus.stopped => t('AI 优化不可用：Ollama 未运行', 'AI off: Ollama not running'),
+              _ => t('AI 优化不可用：无法连接 Ollama', 'AI off: cannot reach Ollama'),
+            }
+          : missingModel
+              ? t('AI 优化不可用：未下载 $model', 'AI off: $model not downloaded')
+              : 'AI · $model',
+      color: bad || missingModel ? Theme.of(context).colorScheme.error : Colors.green,
+      onTap: widget.onOpenRefine,
+    );
   }
 
   Widget _noModelCard(BuildContext context, ModelSpec? spec) {

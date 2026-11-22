@@ -29,7 +29,7 @@ class _HomeShellState extends State<HomeShell> {
   @override
   Widget build(BuildContext context) {
     final pages = [
-      HomePage(onOpenModels: () => go(3), onOpenSettings: () => go(4)),
+      HomePage(onOpenModels: () => go(3), onOpenSettings: () => go(4), onOpenRefine: () => go(2)),
       const HistoryPage(),
       const RefinePage(),
       const ModelsPage(),

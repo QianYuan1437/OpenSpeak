@@ -28,7 +28,7 @@ jobs:
         with: { flutter-version: '${{ env.FLUTTER_VERSION }}', channel: stable, cache: true }
       - run: flutter pub get
       - run: flutter analyze
-      - run: flutter test test/text_test.dart test/gpu_extract_test.dart test/updater_test.dart test/refiner_test.dart
+      - run: flutter test test/text_test.dart test/gpu_extract_test.dart test/updater_test.dart test/refiner_test.dart test/ollama_test.dart
 
   version:
     runs-on: ubuntu-latest

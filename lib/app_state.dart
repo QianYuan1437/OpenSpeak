@@ -1,6 +1,7 @@
 import 'core/dictation.dart';
 import 'core/gpu.dart';
 import 'core/model_manager.dart';
+import 'core/ollama.dart';
 import 'core/perf_monitor.dart';
 import 'core/settings.dart';
 import 'core/updater.dart';
@@ -12,6 +13,7 @@ late final GpuManager gpu;
 late final Dictation dictation;
 late final PerfMonitor perf;
 late final Updater updater;
+late final OllamaManager ollama;
 
 /// CI passes the build name (e.g. 0.1.0-dev.12) via --dart-define.
 const kAppVersion = String.fromEnvironment('OPENSPEAK_VERSION', defaultValue: '0.1.0');

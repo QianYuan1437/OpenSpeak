@@ -14,6 +14,7 @@ import 'mic_profiles.dart';
 import 'model_catalog.dart';
 import 'model_manager.dart';
 import 'native_bridge.dart';
+import 'ollama.dart';
 import 'settings.dart';
 import 'text_output.dart';
 import 'text_refiner.dart';
@@ -44,7 +45,7 @@ class HistoryItem {
 /// Orchestrates capture → recognition → output, driven by the UI, global
 /// hotkeys (desktop) or the floating bubble (Android).
 class Dictation extends ChangeNotifier {
-  Dictation(this.settings, this.models, this.gpu) {
+  Dictation(this.settings, this.models, this.gpu, this.ollama) {
     output = TextOutput(bridge);
     _engineSub = engine.events.listen(_onAsr);
     _nativeSub = bridge.events.listen(_onNative);
@@ -57,6 +58,7 @@ class Dictation extends ChangeNotifier {
   final Settings settings;
   final ModelManager models;
   final GpuManager gpu;
+  final OllamaManager ollama;
   final engine = AsrEngine();
   final capture = AudioCapture();
   final bridge = NativeBridge.instance;
@@ -122,7 +124,25 @@ class Dictation extends ChangeNotifier {
     if (isDesktop) await applyHotkey();
     unawaited(ensureModel());
     warmUpLlm();
+    unawaited(_checkOllamaAtStart());
   }
+
+  bool get _usesOllama => settings.llmEnabled && llmProviderById(settings.llmProvider).local;
+
+  /// AI correction is on but Ollama is not there: say so once at launch.
+  Future<void> _checkOllamaAtStart() async {
+    if (!_usesOllama) return;
+    await Future<void>.delayed(const Duration(seconds: 3));
+    if (await ollama.ensureRunning()) return;
+    _messages.add(_ollamaHint());
+  }
+
+  String _ollamaHint() => switch (ollama.status) {
+        OllamaStatus.missing => 'AI 优化已开启，但这台电脑还没有安装 Ollama，请到「优化」页一键安装 / '
+            'AI correction is on but Ollama is not installed — install it from the Refine tab',
+        OllamaStatus.stopped => 'Ollama 未运行，请到「优化」页启动 / Ollama is not running — start it from the Refine tab',
+        _ => '无法连接 Ollama（${ollama.apiBase}），请检查「优化」页的地址 / Cannot reach Ollama at ${ollama.apiBase}',
+      };
 
   // Models ------------------------------------------------------------------
 
@@ -380,13 +400,16 @@ class Dictation extends ChangeNotifier {
 
   DateTime _lastWarmUp = DateTime(0);
 
-  /// Preloads a local AI model (Ollama) while the user is still speaking.
+  /// Preloads a local AI model (Ollama) while the user is still speaking,
+  /// starting an installed Ollama first if needed.
   void warmUpLlm({bool force = false}) {
-    if (!settings.llmEnabled || !llmProviderById(settings.llmProvider).local) return;
+    if (!_usesOllama) return;
     final now = DateTime.now();
     if (!force && now.difference(_lastWarmUp) < const Duration(minutes: 1)) return;
     _lastWarmUp = now;
-    unawaited(llm.warmUp(settings.llmConfig));
+    unawaited(() async {
+      if (await ollama.ensureRunning()) await llm.warmUp(settings.llmConfig);
+    }());
   }
 
   /// The full clean-up applied to every result: Traditional→Simplified,
@@ -400,6 +423,7 @@ class Dictation extends ChangeNotifier {
     String? llmError;
     int? llmMs;
     var used = false;
+    var unreachable = false;
     if ((useLlm ?? settings.llmEnabled) && text.isNotEmpty) {
       final sw = Stopwatch()..start();
       try {
@@ -408,12 +432,17 @@ class Dictation extends ChangeNotifier {
         used = true;
       } on LlmException catch (e) {
         llmError = e.message;
+        unreachable = e.unreachable;
       }
       llmMs = sw.elapsedMilliseconds;
     }
     final strip = settings.stripTrailingPeriod;
     return RefineResult(postProcess(text, stripTrailingPeriod: strip),
-        raw: postProcess(raw, stripTrailingPeriod: strip), usedLlm: used, llmError: llmError, llmMs: llmMs);
+        raw: postProcess(raw, stripTrailingPeriod: strip),
+        usedLlm: used,
+        llmError: llmError,
+        llmUnreachable: unreachable,
+        llmMs: llmMs);
   }
 
   Future<void> _onFinal(AsrFinal fin) async {
@@ -427,7 +456,12 @@ class Dictation extends ChangeNotifier {
     // Cancelled while the AI was working.
     if (state != DictationState.processing) return;
     final text = r.text;
-    if (r.llmError != null) _messages.add('AI 优化未生效，已输出本地结果 / AI refine skipped: ${r.llmError}');
+    if (r.llmUnreachable && _usesOllama) {
+      await ollama.refresh();
+      _messages.add('AI 优化未生效：${_ollamaHint()}');
+    } else if (r.llmError != null) {
+      _messages.add('AI 优化未生效，已输出本地结果 / AI refine skipped: ${r.llmError}');
+    }
     segments.clear();
     partial = '';
     state = DictationState.idle;
