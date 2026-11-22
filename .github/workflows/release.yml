@@ -118,6 +118,9 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         env: { GH_TOKEN: '${{ github.token }}' }
         run: |
+          # actions/checkout turns the tag into a lightweight one; fetch the
+          # annotated tag again so its message (not the commit's) is used.
+          git fetch --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
           git tag -l --format='%(contents)' "$GITHUB_REF_NAME" > notes.md
           gh release delete "$GITHUB_REF_NAME" --yes 2>/dev/null || true
           gh release create "$GITHUB_REF_NAME" dist/* --title "OpenSpeak $GITHUB_REF_NAME" --notes-file notes.md
