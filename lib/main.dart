@@ -32,7 +32,7 @@ Future<void> main(List<String> args) async {
   updater = Updater(kRepo, kAppVersion);
   final installGpu = args.contains('--install-gpu') && gpu.available && !gpu.ready;
   if (installGpu) {
-    HomeShell.initialPage = 2;
+    HomeShell.initialPage = 3;
   }
   if (isDesktop) {
     // Always show the window on the first launch and the first launch of a

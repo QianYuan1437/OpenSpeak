@@ -6,13 +6,14 @@ import 'home_page.dart';
 import 'i18n.dart';
 import 'theme.dart';
 import 'models_page.dart';
+import 'refine_page.dart';
 import 'settings_page.dart';
 
 /// Responsive navigation: side rail on wide windows, bottom bar on phones.
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
 
-  /// Page shown first (0 dictation, 1 history, 2 models, 3 settings).
+  /// Page shown first (0 dictation, 1 history, 2 refine, 3 models, 4 settings).
   static int initialPage = 0;
 
   @override
@@ -28,14 +29,16 @@ class _HomeShellState extends State<HomeShell> {
   @override
   Widget build(BuildContext context) {
     final pages = [
-      HomePage(onOpenModels: () => go(2), onOpenSettings: () => go(3)),
+      HomePage(onOpenModels: () => go(3), onOpenSettings: () => go(4)),
       const HistoryPage(),
+      const RefinePage(),
       const ModelsPage(),
       const SettingsPage(),
     ];
     final dests = [
       (Icons.mic_none_rounded, Icons.mic_rounded, t('听写', 'Dictate')),
       (Icons.history_rounded, Icons.history_rounded, t('历史', 'History')),
+      (Icons.auto_fix_high_outlined, Icons.auto_fix_high_rounded, t('优化', 'Refine')),
       (Icons.memory_outlined, Icons.memory_rounded, t('模型', 'Models')),
       (Icons.tune_outlined, Icons.tune_rounded, t('设置', 'Settings')),
     ];
@@ -91,7 +94,7 @@ class _HomeShellState extends State<HomeShell> {
                       borderRadius: BorderRadius.circular(8),
                       onTap: () {
                         SettingsPage.requestUpdateCheck();
-                        go(3);
+                        go(4);
                       },
                       child: Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),

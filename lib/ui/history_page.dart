@@ -55,10 +55,28 @@ class HistoryPage extends StatelessWidget {
                   title: Text(h.text, style: const TextStyle(height: 1.5)),
                   subtitle: Padding(
                     padding: const EdgeInsets.only(top: 6),
-                    child: Text(
-                      '${_fmt(h.time)} · ${formatDuration(h.audioMs)}',
-                      style: TextStyle(fontSize: 12, color: scheme.outline),
-                    ),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      if (h.raw != null)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 4),
+                          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            Padding(
+                              padding: const EdgeInsets.only(top: 2, right: 6),
+                              child: Icon(Icons.auto_fix_high_rounded, size: 14, color: scheme.primary),
+                            ),
+                            Expanded(
+                              child: Text(
+                                '${t('原文', 'Original')}：${h.raw}',
+                                style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant, height: 1.4),
+                              ),
+                            ),
+                          ]),
+                        ),
+                      Text(
+                        '${_fmt(h.time)} · ${formatDuration(h.audioMs)}',
+                        style: TextStyle(fontSize: 12, color: scheme.outline),
+                      ),
+                    ]),
                   ),
                   trailing: Row(mainAxisSize: MainAxisSize.min, children: [
                     IconButton(

@@ -33,7 +33,12 @@
 - **GPU 加速**：检测到 NVIDIA 显卡时可一键下载 CUDA 加速包（cuDNN/cuBLAS 从国内 PyPI 镜像获取），无需安装 CUDA 工具包。
 - **创作者麦克风适配**：自动识别 **DJI Mic / Mic Mini**、**Godox MoveLink / Virso**、**影石 Insta360 Mic Air**、RØDE、Hollyland、Saramonic、BOYA 等接收器，插入即自动切换；双发射器可按左/右声道（TX1 / TX2）单独拾音；内置自动增益，领夹麦音量小也能稳定识别。
 - **实时预览 + VAD 分句**：Silero VAD 按停顿切句，长段落边说边出字。
-- 繁转简、去句末句号、历史记录、深浅色与 8 种主题色、中英文界面。
+- **识别结果优化（“优化”页）**：
+  - 离线规则：去除语气词（嗯、呃、单独的“那个”）、去除口吃重复（“我我我想”→“我想”）、规范中文标点、常见术语大小写（github → GitHub）、中英文之间加空格、繁转简、去句末句号。
+  - 自定义词典：专有名词表 + “错词 → 正词”替换规则，支持批量编辑。
+  - AI 纠错与润色（可选）：接入本地 [Ollama](https://ollama.com)（文字不出本机）或 DeepSeek、通义千问、Claude 及任意 OpenAI 兼容接口，按上下文改正同音错别字；可选“只纠错 / 纠错并润色 / 自定义提示词”。超时或出错时自动输出规则处理后的结果。
+  - “试一试”面板可即时查看优化效果；历史记录中保留优化前的原文。
+- 历史记录、深浅色与 8 种主题色、中英文界面。
 
 ## 下载
 
@@ -55,6 +60,7 @@
 2. 在任意应用的输入框中 **按住右 Ctrl** 说话，松开后文字自动输入。
 3. 关闭窗口后程序驻留托盘，快捷键持续可用；托盘菜单可退出。
 4. 设置页可更换麦克风、声道、增益、快捷键、触发方式与输出方式（模拟键入 / 粘贴 / 仅复制）。
+5. 想要自动纠正错别字：在“优化”页打开“AI 纠错与润色”。本地使用请先安装 Ollama 并运行 `ollama pull qwen2.5:3b`，再点“测试连接”。
 
 ## 从源码构建
 
@@ -67,13 +73,13 @@ flutter run -d linux     # sudo apt install clang cmake ninja-build pkg-config l
 flutter build apk --split-per-abi
 ```
 
-测试：`flutter test test/text_test.dart`；识别引擎的集成测试需要本地模型，见 `test/models_test.dart` 顶部说明。
+测试：`flutter test test/text_test.dart test/refiner_test.dart`；识别引擎的集成测试需要本地模型，见 `test/models_test.dart` 顶部说明。
 
 ## 目录结构
 
 ```
-lib/core/      识别引擎（后台 isolate）、录音与麦克风适配、模型/GPU 包下载、听写流程
-lib/ui/        界面（听写、历史、模型、设置、录音浮条）
+lib/core/      识别引擎（后台 isolate）、录音与麦克风适配、模型/GPU 包下载、听写流程、识别结果优化（规则 + AI）
+lib/ui/        界面（听写、历史、优化、模型、设置、录音浮条）
 windows/runner/openspeak_native.cpp   全局快捷键（低级键盘钩子）、SendInput 键入、浮条窗口
 linux/runner/openspeak_native.cc      X11 全局快捷键、浮条窗口
 android/app/src/main/kotlin/…         悬浮球前台服务、无障碍输入服务

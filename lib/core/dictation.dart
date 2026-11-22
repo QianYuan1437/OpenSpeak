@@ -16,20 +16,29 @@ import 'model_manager.dart';
 import 'native_bridge.dart';
 import 'settings.dart';
 import 'text_output.dart';
+import 'text_refiner.dart';
 
 enum DictationState { idle, loading, listening, processing, error }
 
 class HistoryItem {
-  HistoryItem(this.text, this.time, this.audioMs);
+  HistoryItem(this.text, this.time, this.audioMs, {this.raw});
   final String text;
   final DateTime time;
   final int audioMs;
 
-  Map<String, Object> toJson() =>
-      {'text': text, 'time': time.millisecondsSinceEpoch, 'audioMs': audioMs};
+  /// Recognizer output before refinement, when refinement changed it.
+  final String? raw;
+
+  Map<String, Object> toJson() => {
+        'text': text,
+        'time': time.millisecondsSinceEpoch,
+        'audioMs': audioMs,
+        'raw': ?raw,
+      };
 
   factory HistoryItem.fromJson(Map m) => HistoryItem(m['text'] as String,
-      DateTime.fromMillisecondsSinceEpoch(m['time'] as int), m['audioMs'] as int? ?? 0);
+      DateTime.fromMillisecondsSinceEpoch(m['time'] as int), m['audioMs'] as int? ?? 0,
+      raw: m['raw'] as String?);
 }
 
 /// Orchestrates capture → recognition → output, driven by the UI, global
@@ -52,12 +61,16 @@ class Dictation extends ChangeNotifier {
   final capture = AudioCapture();
   final bridge = NativeBridge.instance;
   late final TextOutput output;
+  final llm = LlmRefiner();
   late final StreamSubscription<AsrEvent> _engineSub;
   late final StreamSubscription<NativeEvent> _nativeSub;
   final _levelTick = StreamController<double>.broadcast();
   final _messages = StreamController<String>.broadcast();
 
   DictationState state = DictationState.idle;
+
+  /// The final text is with the AI for correction (still `processing`).
+  bool refining = false;
   String? error;
   double level = 0;
   String partial = '';
@@ -108,6 +121,7 @@ class Dictation extends ChangeNotifier {
     });
     if (isDesktop) await applyHotkey();
     unawaited(ensureModel());
+    warmUpLlm();
   }
 
   // Models ------------------------------------------------------------------
@@ -316,6 +330,7 @@ class Dictation extends ChangeNotifier {
       return;
     }
     _sessionStartMs = DateTime.now().millisecondsSinceEpoch;
+    warmUpLlm();
     state = DictationState.listening;
     _pushBubble();
     notifyListeners();
@@ -363,10 +378,56 @@ class Dictation extends ChangeNotifier {
     notifyListeners();
   }
 
+  DateTime _lastWarmUp = DateTime(0);
+
+  /// Preloads a local AI model (Ollama) while the user is still speaking.
+  void warmUpLlm({bool force = false}) {
+    if (!settings.llmEnabled || !llmProviderById(settings.llmProvider).local) return;
+    final now = DateTime.now();
+    if (!force && now.difference(_lastWarmUp) < const Duration(minutes: 1)) return;
+    _lastWarmUp = now;
+    unawaited(llm.warmUp(settings.llmConfig));
+  }
+
+  /// The full clean-up applied to every result: Traditional→Simplified,
+  /// offline rules, optional AI correction (falls back to the rule result on
+  /// any failure), then the trailing-period option. Also backs the Refine
+  /// page's try-it box, which passes [useLlm] explicitly.
+  Future<RefineResult> refine(String recognized, {bool? useLlm}) async {
+    final raw = postProcess(recognized, stripTrailingPeriod: false, toSimplified: settings.toSimplified);
+    final rules = settings.ruleOptions;
+    var text = applyRules(raw, rules);
+    String? llmError;
+    int? llmMs;
+    var used = false;
+    if ((useLlm ?? settings.llmEnabled) && text.isNotEmpty) {
+      final sw = Stopwatch()..start();
+      try {
+        // Rules run again so dictionary terms and punctuation stay applied.
+        text = applyRules(await llm.refine(text, settings.llmConfig), rules);
+        used = true;
+      } on LlmException catch (e) {
+        llmError = e.message;
+      }
+      llmMs = sw.elapsedMilliseconds;
+    }
+    final strip = settings.stripTrailingPeriod;
+    return RefineResult(postProcess(text, stripTrailingPeriod: strip),
+        raw: postProcess(raw, stripTrailingPeriod: strip), usedLlm: used, llmError: llmError, llmMs: llmMs);
+  }
+
   Future<void> _onFinal(AsrFinal fin) async {
     if (state != DictationState.processing) return;
-    final text = postProcess(fin.text,
-        stripTrailingPeriod: settings.stripTrailingPeriod, toSimplified: settings.toSimplified);
+    if (settings.llmEnabled && fin.text.trim().isNotEmpty) {
+      refining = true;
+      notifyListeners();
+    }
+    final r = await refine(fin.text);
+    refining = false;
+    // Cancelled while the AI was working.
+    if (state != DictationState.processing) return;
+    final text = r.text;
+    if (r.llmError != null) _messages.add('AI 优化未生效，已输出本地结果 / AI refine skipped: ${r.llmError}');
     segments.clear();
     partial = '';
     state = DictationState.idle;
@@ -379,7 +440,7 @@ class Dictation extends ChangeNotifier {
     final audioMs = fin.audioMs > 0
         ? fin.audioMs
         : DateTime.now().millisecondsSinceEpoch - _sessionStartMs;
-    _addHistory(HistoryItem(text, DateTime.now(), audioMs));
+    _addHistory(HistoryItem(text, DateTime.now(), audioMs, raw: r.raw != text ? r.raw : null));
     if (_deliverExternally) {
       if (_pill) {
         // Let the pill vanish first so focus is surely back on the target.

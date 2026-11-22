@@ -19,7 +19,8 @@ class PillView extends StatelessWidget {
     final s = dictation.state;
     final processing = s == DictationState.processing;
     final color = processing ? kProcessing : kListening;
-    final live = dictation.liveText;
+    final refining = dictation.refining;
+    final live = refining ? '' : dictation.liveText;
     // Show the newest words; the start of a long utterance scrolls away.
     final text = live.length > 40 ? '…${live.substring(live.length - 40)}' : live;
     return Scaffold(
@@ -43,7 +44,9 @@ class PillView extends StatelessWidget {
                     end: Alignment.bottomRight,
                   ),
                 ),
-                child: processing
+                child: refining
+                    ? const Icon(Icons.auto_fix_high_rounded, color: Colors.white, size: 22)
+                    : processing
                     ? const Padding(
                         padding: EdgeInsets.all(13),
                         child: CircularProgressIndicator(strokeWidth: 2.4, color: Colors.white),
@@ -53,7 +56,11 @@ class PillView extends StatelessWidget {
               const SizedBox(width: 14),
               Expanded(
                 child: Text(
-                  text.isNotEmpty ? text : (processing ? t('识别中…', 'Recognizing…') : t('正在聆听…', 'Listening…')),
+                  text.isNotEmpty
+                      ? text
+                      : refining
+                      ? t('AI 优化中…', 'Refining…')
+                      : (processing ? t('识别中…', 'Recognizing…') : t('正在聆听…', 'Listening…')),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   textAlign: TextAlign.center,

@@ -353,20 +353,6 @@ class _SettingsPageState extends State<SettingsPage> {
               },
             ),
           ),
-        SwitchListTile(
-          contentPadding: EdgeInsets.zero,
-          title: Text(t('繁体转简体', 'Convert Traditional to Simplified Chinese')),
-          subtitle: Text(t('部分模型（如 Qwen3）可能输出繁体字', 'Some models (e.g. Qwen3) may output Traditional characters')),
-          value: settings.toSimplified,
-          onChanged: (v) => settings.update((s) => s.toSimplified = v),
-        ),
-        SwitchListTile(
-          contentPadding: EdgeInsets.zero,
-          title: Text(t('去掉句末句号', 'Drop trailing period')),
-          subtitle: Text(t('适合聊天软件里的短句输入', 'Handy for short chat messages')),
-          value: settings.stripTrailingPeriod,
-          onChanged: (v) => settings.update((s) => s.stripTrailingPeriod = v),
-        ),
         Row(
           children: [
             Text(t('CPU 线程', 'CPU threads'), style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),

@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'audio_capture.dart';
+import 'text_refiner.dart';
 
 enum TriggerMode { hold, toggle }
 
@@ -104,6 +105,71 @@ class Settings extends ChangeNotifier {
   static const _prefsVersion = 2;
   bool bubbleEnabled = false;
 
+  // Refine page: offline rules.
+  bool removeFillers = true;
+  bool removeStutter = true;
+  bool normalizePunctuation = true;
+  bool cjkSpacing = false;
+  bool termCasing = true;
+  bool fixAllCaps = true;
+  List<Replacement> replacements = [];
+  List<String> vocabulary = [];
+
+  // Refine page: AI correction.
+  bool llmEnabled = false;
+  String llmProvider = 'ollama';
+  LlmMode llmMode = LlmMode.correct;
+  String llmPrompt = '';
+  int llmTimeoutSec = 8;
+
+  /// Per provider: {baseUrl, model, apiKey}, so switching keeps each key.
+  Map<String, Map<String, String>> llmEndpoints = {};
+
+  /// URL / model / key of [id], falling back to the preset's defaults.
+  ({String baseUrl, String model, String apiKey}) endpointOf(String id) {
+    final p = llmProviderById(id);
+    final e = llmEndpoints[id] ?? const {};
+    return (
+      baseUrl: e['baseUrl'] ?? p.baseUrl,
+      model: e['model'] ?? p.model,
+      apiKey: e['apiKey'] ?? '',
+    );
+  }
+
+  void setEndpoint(String id, {String? baseUrl, String? model, String? apiKey}) {
+    final e = endpointOf(id);
+    llmEndpoints[id] = {
+      'baseUrl': baseUrl ?? e.baseUrl,
+      'model': model ?? e.model,
+      'apiKey': apiKey ?? e.apiKey,
+    };
+  }
+
+  RuleOptions get ruleOptions => RuleOptions(
+        removeFillers: removeFillers,
+        removeStutter: removeStutter,
+        normalizePunctuation: normalizePunctuation,
+        cjkSpacing: cjkSpacing,
+        termCasing: termCasing,
+        fixAllCaps: fixAllCaps,
+        replacements: replacements,
+        vocabulary: vocabulary,
+      );
+
+  LlmConfig get llmConfig {
+    final e = endpointOf(llmProvider);
+    return LlmConfig(
+      api: llmProviderById(llmProvider).api,
+      baseUrl: e.baseUrl,
+      model: e.model,
+      apiKey: e.apiKey,
+      mode: llmMode,
+      customPrompt: llmPrompt,
+      vocabulary: vocabulary,
+      timeout: Duration(seconds: llmTimeoutSec),
+    );
+  }
+
   static int get defaultThreads =>
       math.max(1, math.min(4, Platform.numberOfProcessors ~/ 2));
 
@@ -143,6 +209,25 @@ class Settings extends ChangeNotifier {
       // on by accident; it now only means "hide when opened manually".
       if ((m['prefsVersion'] as int? ?? 1) < 2) startHidden = false;
       bubbleEnabled = m['bubbleEnabled'] as bool? ?? bubbleEnabled;
+      removeFillers = m['removeFillers'] as bool? ?? removeFillers;
+      removeStutter = m['removeStutter'] as bool? ?? removeStutter;
+      normalizePunctuation = m['normalizePunctuation'] as bool? ?? normalizePunctuation;
+      cjkSpacing = m['cjkSpacing'] as bool? ?? cjkSpacing;
+      termCasing = m['termCasing'] as bool? ?? termCasing;
+      fixAllCaps = m['fixAllCaps'] as bool? ?? fixAllCaps;
+      replacements = [
+        for (final r in m['replacements'] as List? ?? const []) Replacement.fromJson(r as Map),
+      ];
+      vocabulary = [for (final w in m['vocabulary'] as List? ?? const []) w as String];
+      llmEnabled = m['llmEnabled'] as bool? ?? llmEnabled;
+      llmProvider = m['llmProvider'] as String? ?? llmProvider;
+      llmMode = LlmMode.values.byName(m['llmMode'] as String? ?? 'correct');
+      llmPrompt = m['llmPrompt'] as String? ?? llmPrompt;
+      llmTimeoutSec = m['llmTimeoutSec'] as int? ?? llmTimeoutSec;
+      llmEndpoints = {
+        for (final e in (m['llmEndpoints'] as Map? ?? const {}).entries)
+          e.key as String: (e.value as Map).map((k, v) => MapEntry(k as String, v as String)),
+      };
     } catch (_) {
       // Corrupt or older settings: keep defaults.
     }
@@ -180,5 +265,19 @@ class Settings extends ChangeNotifier {
         'lastRunVersion': lastRunVersion,
         'prefsVersion': _prefsVersion,
         'bubbleEnabled': bubbleEnabled,
+        'removeFillers': removeFillers,
+        'removeStutter': removeStutter,
+        'normalizePunctuation': normalizePunctuation,
+        'cjkSpacing': cjkSpacing,
+        'termCasing': termCasing,
+        'fixAllCaps': fixAllCaps,
+        'replacements': [for (final r in replacements) r.toJson()],
+        'vocabulary': vocabulary,
+        'llmEnabled': llmEnabled,
+        'llmProvider': llmProvider,
+        'llmMode': llmMode.name,
+        'llmPrompt': llmPrompt,
+        'llmTimeoutSec': llmTimeoutSec,
+        'llmEndpoints': llmEndpoints,
       };
 }
