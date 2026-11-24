@@ -140,6 +140,52 @@ void main() {
       expect(msgs.last['content'], '<text>明天在见。</text>');
     });
 
+    test('Ollama: native API with keep-alive and fixed options', () async {
+      late http.Request seen;
+      final client = MockClient((req) async {
+        seen = req;
+        return http.Response.bytes(
+            utf8.encode(jsonEncode({
+              'message': {'role': 'assistant', 'content': '明天再见。'},
+              'done': true,
+            })),
+            200);
+      });
+      final out = await LlmRefiner(client: client).refine(
+          '明天在见。',
+          const LlmConfig(
+              api: LlmApi.openai, baseUrl: 'http://127.0.0.1:11434/v1/', model: 'qwen2.5:3b', ollama: true));
+      expect(out, '明天再见。');
+      expect(seen.url.toString(), 'http://127.0.0.1:11434/api/chat');
+      final body = jsonDecode(seen.body) as Map;
+      expect(body['stream'], false);
+      expect(body['think'], false);
+      expect(body['keep_alive'], LlmRefiner.ollamaKeepAlive);
+      expect(body['options'], LlmRefiner.ollamaOptions);
+      expect((body['messages'] as List).last['content'], '<text>明天在见。</text>');
+
+      // Warm-up loads the model with the same options, so it is not reloaded.
+      await LlmRefiner(client: client).warmUp(
+          const LlmConfig(api: LlmApi.openai, baseUrl: 'http://127.0.0.1:11434/v1', model: 'qwen2.5:3b', ollama: true));
+      expect(seen.url.toString(), 'http://127.0.0.1:11434/api/generate');
+      final warm = jsonDecode(seen.body) as Map;
+      expect(warm['options'], body['options']);
+      expect(warm['keep_alive'], body['keep_alive']);
+      expect(warm['think'], false);
+    });
+
+    test('Ollama: a dropped connection is retried once', () async {
+      var calls = 0;
+      final client = MockClient((req) async {
+        if (++calls == 1) throw http.ClientException('Connection closed before full header was received');
+        return http.Response.bytes(utf8.encode('{"message":{"content":"好的。"}}'), 200);
+      });
+      final out = await LlmRefiner(client: client)
+          .refine('好的', const LlmConfig(api: LlmApi.openai, baseUrl: 'http://127.0.0.1:11434/v1', model: 'm', ollama: true));
+      expect(out, '好的。');
+      expect(calls, 2);
+    });
+
     test('Anthropic request and answer', () async {
       late http.Request seen;
       final client = MockClient((req) async {

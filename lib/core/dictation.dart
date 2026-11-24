@@ -127,7 +127,8 @@ class Dictation extends ChangeNotifier {
     unawaited(_checkOllamaAtStart());
   }
 
-  bool get _usesOllama => settings.llmEnabled && llmProviderById(settings.llmProvider).local;
+  bool get _ollamaProvider => llmProviderById(settings.llmProvider).local;
+  bool get _usesOllama => settings.llmEnabled && _ollamaProvider;
 
   /// AI correction is on but Ollama is not there: say so once at launch.
   Future<void> _checkOllamaAtStart() async {
@@ -399,17 +400,31 @@ class Dictation extends ChangeNotifier {
   }
 
   DateTime _lastWarmUp = DateTime(0);
+  Future<void>? _warming;
 
   /// Preloads a local AI model (Ollama) while the user is still speaking,
   /// starting an installed Ollama first if needed.
   void warmUpLlm({bool force = false}) {
-    if (!_usesOllama) return;
+    if (_usesOllama) unawaited(_warmUp(force: force));
+  }
+
+  /// Starts loading the model, or joins a load in progress; completes when
+  /// it is in memory (or the attempt failed).
+  Future<void> _warmUp({bool force = false}) {
     final now = DateTime.now();
-    if (!force && now.difference(_lastWarmUp) < const Duration(minutes: 1)) return;
+    if (!force && (_warming != null || now.difference(_lastWarmUp) < const Duration(minutes: 1))) {
+      return _warming ?? Future.value();
+    }
     _lastWarmUp = now;
-    unawaited(() async {
-      if (await ollama.ensureRunning()) await llm.warmUp(settings.llmConfig);
-    }());
+    late final Future<void> run;
+    run = () async {
+      try {
+        if (await ollama.ensureRunning()) await llm.warmUp(settings.llmConfig);
+      } finally {
+        if (identical(_warming, run)) _warming = null;
+      }
+    }();
+    return _warming = run;
   }
 
   /// The full clean-up applied to every result: Traditional→Simplified,
@@ -427,6 +442,15 @@ class Dictation extends ChangeNotifier {
     if ((useLlm ?? settings.llmEnabled) && text.isNotEmpty) {
       final sw = Stopwatch()..start();
       try {
+        if (_ollamaProvider) {
+          final model = settings.llmConfig.model.trim();
+          if (ollama.pulling == model) {
+            throw const LlmException('模型还在下载，下载完成后生效 / The model is still downloading');
+          }
+          // A model that is still loading (first use, or unloaded after a
+          // while) would run into the timeout: wait for it instead.
+          await _warmUp().timeout(const Duration(seconds: 60), onTimeout: () {});
+        }
         // Rules run again so dictionary terms and punctuation stay applied.
         text = applyRules(await llm.refine(text, settings.llmConfig), rules);
         used = true;

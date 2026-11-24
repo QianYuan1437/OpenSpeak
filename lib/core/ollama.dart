@@ -11,6 +11,7 @@ import 'package:path_provider/path_provider.dart';
 
 import 'audio_capture.dart' show isDesktop;
 import 'model_manager.dart' show DownloadCancelled, DownloadProgress;
+import 'net.dart';
 import 'settings.dart';
 
 enum OllamaStatus {
@@ -481,7 +482,7 @@ class OllamaManager extends ChangeNotifier {
 
   HttpClient _client() => HttpClient()
     ..connectionTimeout = const Duration(seconds: 15)
-    ..findProxy = HttpClient.findProxyFromEnvironment
+    ..findProxy = proxyFor
     ..userAgent = 'OpenSpeak';
 
   Future<String> _getText(Uri url) async {
@@ -500,9 +501,11 @@ class OllamaManager extends ChangeNotifier {
   static Future<String> _sha256(File f) async => (await sha256.bind(f.openRead()).first).toString();
 
   /// Downloads from the first source that is fast enough into
-  /// `dir/<name(url)>`; a second pass accepts any speed. Each source resumes
-  /// its own `.part` (mirrors may serve different builds). Returns the source
-  /// used and the redirect chain it went through.
+  /// `dir/<name(url)>`; a second pass accepts any speed, starting with the
+  /// source that got furthest. Each source resumes its own `.part` (mirrors
+  /// may serve different builds); dropped or stalled connections are resumed
+  /// before moving on. Returns the source used and the redirect chain it
+  /// went through.
   Future<(Uri, List<Uri>)> _downloadAny(
     List<Uri> urls,
     String dir,
@@ -510,19 +513,33 @@ class OllamaManager extends ChangeNotifier {
     required void Function(String host, int got, int total) onProgress,
     required bool Function() cancelled,
     int fastEnough = 1024 * 1024,
-  }) async {
+  }) => countDownload(() async {
     Object? lastError;
+    int have(Uri url) {
+      final f = File(_partPath(dir, name(url), url));
+      return f.existsSync() ? f.lengthSync() : 0;
+    }
+
     for (final strict in [true, false]) {
-      for (final url in urls) {
+      final order = strict ? urls : ([...urls]..sort((a, b) => have(b) - have(a)));
+      for (final url in order) {
         final file = name(url);
         final part = File(_partPath(dir, file, url));
         try {
-          final chain = await _fetch(
-            url,
-            part,
-            minRate: strict && urls.length > 1 ? fastEnough : 0,
-            onProgress: (got, total) => onProgress(url.host, got, total),
+          final chain = await retryTransient(
+            () => _fetch(
+              url,
+              part,
+              minRate: strict && urls.length > 1 ? fastEnough : 0,
+              onProgress: (got, total) => onProgress(url.host, got, total),
+              cancelled: cancelled,
+            ),
+            // First pass: an unreachable source is skipped at once, one that
+            // was delivering is resumed. Second pass: a few tries each.
+            tries: strict ? 1 : 4,
+            progress: () => have(url),
             cancelled: cancelled,
+            onCancel: DownloadCancelled.new,
           );
           final dest = File(p.join(dir, file));
           if (await dest.exists()) await dest.delete();
@@ -540,7 +557,7 @@ class OllamaManager extends ChangeNotifier {
       }
     }
     throw lastError!;
-  }
+  });
 
   /// Resumable GET into [part]; redirects are followed by hand so the Range
   /// header survives CDN hops. Returns the URLs visited.
@@ -601,14 +618,15 @@ class OllamaManager extends ChangeNotifier {
           }
           if (now.difference(windowStart) >= const Duration(seconds: 12)) {
             final rate = (got - windowBytes) / now.difference(windowStart).inSeconds;
-            if (rate < minRate) throw Exception('${url.host} too slow');
+            // Other downloads running take their share of the bandwidth.
+            if (rate < minRate && activeDownloads <= 1) throw Exception('${url.host} too slow');
             (windowStart, windowBytes) = (now, got);
           }
         }
       } finally {
         await sink.close();
       }
-      if (total > 0 && got < total) throw Exception('${url.host}: connection closed early');
+      if (total > 0 && got < total) throw HttpException('${url.host}: connection closed early', uri: url);
       onProgress(got, total);
       return chain;
     } finally {

@@ -9,6 +9,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import 'model_catalog.dart';
+import 'net.dart';
 
 class DownloadProgress {
   const DownloadProgress(this.received, this.total, this.stage, {this.source});
@@ -119,6 +120,7 @@ class ModelManager extends ChangeNotifier {
     errors.remove(m.id);
     _report(m, DownloadProgress(0, m.sizeMB * 1024 * 1024, 'download'));
     final failures = <String>[];
+    activeDownloads++;
     try {
       if (m.onHuggingFace) {
         for (final host in ['huggingface.co', 'hf-mirror.com']) {
@@ -146,6 +148,7 @@ class ModelManager extends ChangeNotifier {
     } catch (e) {
       errors[m.id] = e.toString();
     } finally {
+      activeDownloads--;
       progress.remove(m.id);
       notifyListeners();
     }
@@ -158,7 +161,7 @@ class ModelManager extends ChangeNotifier {
     // Sizes first so the progress bar is accurate across files.
     final sizes = <String, int>{};
     for (final rel in rels) {
-      sizes[rel] = await _contentLength(_hfUrl(host, m.dir, rel));
+      sizes[rel] = await _retry(m, () => _contentLength(_hfUrl(host, m.dir, rel)));
     }
     final total = sizes.values.fold<int>(0, (a, b) => a + b);
     var done = 0;
@@ -168,9 +171,12 @@ class ModelManager extends ChangeNotifier {
         done += sizes[rel]!;
         continue;
       }
-      await _fetch(_hfUrl(host, m.dir, rel), dest, (got) {
-        _report(m, DownloadProgress(done + got, total, 'download', source: host));
-      }, m.id);
+      await _retry(
+          m,
+          () => _fetch(_hfUrl(host, m.dir, rel), dest, (got) {
+                _report(m, DownloadProgress(done + got, total, 'download', source: host));
+              }, m.id),
+          part: dest);
       done += sizes[rel]!;
     }
     await File(p.join(dir.path, '.complete')).writeAsString('$host\n');
@@ -179,10 +185,12 @@ class ModelManager extends ChangeNotifier {
   Future<void> _downloadArchive(ModelSpec m) async {
     const base = 'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models';
     final arc = File(p.join(root.path, m.archive));
-    await _fetch(Uri.parse('$base/${m.archive}'), arc, (got) {
-      _report(m, DownloadProgress(got, m.sizeMB * 1024 * 1024, 'download',
-          source: 'github.com'));
-    }, m.id);
+    await _retry(
+        m,
+        () => _fetch(Uri.parse('$base/${m.archive}'), arc, (got) {
+              _report(m, DownloadProgress(got, m.sizeMB * 1024 * 1024, 'download', source: 'github.com'));
+            }, m.id),
+        part: arc);
     _report(m, const DownloadProgress(0, 0, 'extract'));
     await _extract(arc.path, root.path);
     await arc.delete();
@@ -205,9 +213,21 @@ class ModelManager extends ChangeNotifier {
   Uri _hfUrl(String host, String repo, String file) =>
       Uri.parse('https://$host/csukuangfj/$repo/resolve/main/$file');
 
+  /// Dropped or stalled connections are retried (resuming [part]) before
+  /// the next source is tried.
+  Future<T> _retry<T>(ModelSpec m, Future<T> Function() attempt, {File? part}) {
+    final f = part == null ? null : File('${part.path}.part');
+    return retryTransient(
+      attempt,
+      progress: f == null ? null : () => f.existsSync() ? f.lengthSync() : 0,
+      cancelled: () => _cancelled.contains(m.id),
+      onCancel: DownloadCancelled.new,
+    );
+  }
+
   HttpClient _client() => HttpClient()
     ..connectionTimeout = const Duration(seconds: 15)
-    ..findProxy = HttpClient.findProxyFromEnvironment
+    ..findProxy = proxyFor
     ..userAgent = 'OpenSpeak';
 
   Future<int> _contentLength(Uri url) async {
@@ -275,6 +295,9 @@ class ModelManager extends ChangeNotifier {
           }
         } finally {
           await sink.close();
+        }
+        if (res.contentLength > 0 && got < have + res.contentLength) {
+          throw HttpException('connection closed early', uri: url);
         }
         onBytes(got);
       }

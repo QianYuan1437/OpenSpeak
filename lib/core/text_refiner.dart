@@ -1,7 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:http/http.dart' as http;
+import 'package:http/io_client.dart';
+
+import 'net.dart';
 
 /// One "wrong → right" rule from the user's dictionary.
 class Replacement {
@@ -221,6 +225,7 @@ class LlmConfig {
     this.customPrompt = '',
     this.vocabulary = const [],
     this.timeout = const Duration(seconds: 8),
+    this.ollama = false,
   });
 
   final LlmApi api;
@@ -228,6 +233,9 @@ class LlmConfig {
   final LlmMode mode;
   final List<String> vocabulary;
   final Duration timeout;
+
+  /// The endpoint is Ollama: its native API is used (see [LlmRefiner.refine]).
+  final bool ollama;
 
   LlmConfig copyWith({Duration? timeout}) => LlmConfig(
         api: api,
@@ -238,6 +246,7 @@ class LlmConfig {
         customPrompt: customPrompt,
         vocabulary: vocabulary,
         timeout: timeout ?? this.timeout,
+        ollama: ollama,
       );
 }
 
@@ -331,8 +340,25 @@ bool _onlyDeletes(String input, String output) {
 
 /// Calls an OpenAI-compatible or Anthropic endpoint to correct [text].
 class LlmRefiner {
-  LlmRefiner({http.Client? client}) : _client = client ?? http.Client();
+  LlmRefiner({http.Client? client}) : _client = client ?? IOClient(_httpClient());
   final http.Client _client;
+
+  static HttpClient _httpClient() => HttpClient()
+    ..connectionTimeout = const Duration(seconds: 10)
+    ..findProxy = proxyFor;
+
+  /// Ollama keeps the model loaded this long after each request.
+  static const ollamaKeepAlive = '30m';
+
+  /// Per-request settings for Ollama; warm-up and requests must send the same
+  /// ones, or Ollama reloads the model. A 4K context is plenty for a dictated
+  /// passage and needs far less memory than the default (often 32K), so the
+  /// model loads faster and stays on the GPU. `think: false` stops "thinking"
+  /// models (Qwen3 …) from spending the timeout on reasoning.
+  static const ollamaOptions = {'temperature': 0, 'num_ctx': 4096};
+
+  static String _ollamaBase(String baseUrl) =>
+      baseUrl.trim().replaceFirst(RegExp(r'/+$'), '').replaceFirst(RegExp(r'/v1$'), '');
 
   String systemPrompt(LlmConfig c) {
     final base = switch (c.mode) {
@@ -367,7 +393,23 @@ class LlmRefiner {
     final base = c.baseUrl.trim().replaceFirst(RegExp(r'/+$'), '');
     final http.Response res;
     try {
-      if (c.api == LlmApi.anthropic) {
+      if (c.ollama) {
+        res = await _postRetrying(
+          Uri.parse('${_ollamaBase(base)}/api/chat'),
+          jsonEncode({
+            'model': c.model.trim(),
+            'stream': false,
+            'think': false,
+            'keep_alive': ollamaKeepAlive,
+            'options': ollamaOptions,
+            'messages': [
+              {'role': 'system', 'content': systemPrompt(c)},
+              ...exampleTurns(c),
+              {'role': 'user', 'content': user},
+            ],
+          }),
+        ).timeout(c.timeout);
+      } else if (c.api == LlmApi.anthropic) {
         res = await _client
             .post(
               Uri.parse(base.endsWith('/v1') ? '$base/messages' : '$base/v1/messages'),
@@ -424,7 +466,10 @@ class LlmRefiner {
     final String raw;
     try {
       final j = jsonDecode(body) as Map<String, dynamic>;
-      if (c.api == LlmApi.anthropic) {
+      if (j['error'] != null) throw LlmException('${j['error']}');
+      if (c.ollama) {
+        raw = (j['message'] as Map)['content'] as String? ?? '';
+      } else if (c.api == LlmApi.anthropic) {
         if (j['stop_reason'] == 'refusal') throw const LlmException('模型拒绝处理 / Model declined');
         raw = (j['content'] as List)
             .cast<Map<String, dynamic>>()
@@ -446,18 +491,33 @@ class LlmRefiner {
     return out;
   }
 
-  /// Asks a local Ollama to load the model now and keep it for 30 minutes,
-  /// so the first correction does not wait for a cold start (which can take
-  /// longer than the timeout). Errors are ignored.
+  /// POST to a local service; a connection that drops before any answer
+  /// (e.g. a kept-alive socket Ollama closed meanwhile) is tried once more.
+  Future<http.Response> _postRetrying(Uri url, String body) async {
+    for (var i = 0;; i++) {
+      try {
+        return await _client.post(url, headers: {'content-type': 'application/json'}, body: body);
+      } on http.ClientException {
+        if (i > 0) rethrow;
+      } on SocketException {
+        if (i > 0) rethrow;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+    }
+  }
+
+  /// Asks a local Ollama to load the model now and keep it loaded, so the
+  /// first correction does not wait for a cold start (which can take longer
+  /// than the timeout). Completes when the model is in memory; errors are
+  /// ignored.
   Future<void> warmUp(LlmConfig c) async {
-    final base = c.baseUrl.trim().replaceFirst(RegExp(r'/+$'), '').replaceFirst(RegExp(r'/v1$'), '');
+    final base = _ollamaBase(c.baseUrl);
     if (base.isEmpty || c.model.trim().isEmpty) return;
     try {
-      await _client
-          .post(Uri.parse('$base/api/generate'),
-              headers: {'content-type': 'application/json'},
-              body: jsonEncode({'model': c.model.trim(), 'keep_alive': '30m'}))
-          .timeout(const Duration(minutes: 3));
+      await _postRetrying(
+        Uri.parse('$base/api/generate'),
+        jsonEncode({'model': c.model.trim(), 'think': false, 'keep_alive': ollamaKeepAlive, 'options': ollamaOptions}),
+      ).timeout(const Duration(minutes: 3));
     } catch (_) {}
   }
 

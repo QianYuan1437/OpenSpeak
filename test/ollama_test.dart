@@ -17,6 +17,10 @@ class FakeOllama {
   final blobs = <String, int>{};
   final created = <Map>[];
   final files = <String, List<int>>{};
+
+  /// Files whose next request is cut off halfway (a dropped connection).
+  final dropOnce = <String>{};
+  int fileRequests = 0;
   String? pullError;
 
   Future<void> close() => server.close(force: true);
@@ -30,7 +34,9 @@ Future<FakeOllama> fakeOllama({List<String> models = const [], bool pullFails = 
     final res = req.response..headers.contentType = ContentType.json;
     final path = req.uri.path;
     if (path.startsWith('/files/')) {
-      final data = f.files[path.substring(7)];
+      final name = path.substring(7);
+      final data = f.files[name];
+      f.fileRequests++;
       if (data == null) {
         res.statusCode = 404;
       } else {
@@ -39,6 +45,13 @@ Future<FakeOllama> fakeOllama({List<String> models = const [], bool pullFails = 
         if (range != null) res.statusCode = 206;
         res.headers.contentType = ContentType.binary;
         res.contentLength = data.length - from;
+        if (f.dropOnce.remove(name)) {
+          final socket = await res.detachSocket();
+          socket.add(data.sublist(from, from + (data.length - from) ~/ 2));
+          await socket.flush();
+          socket.destroy();
+          return;
+        }
         res.add(data.sublist(from));
       }
     } else if (path.startsWith('/api/blobs/sha256:')) {
@@ -212,6 +225,18 @@ void main() {
       await part.writeAsBytes(gguf.sublist(0, 1000));
       expect(await o.pull('tiny:1b'), isTrue);
       expect(server.blobs[digest], gguf.length);
+    });
+
+    test('a dropped connection resumes from the same mirror', () async {
+      o.mirrors = {'tiny:1b': mirror()};
+      server.dropOnce.add('tiny.gguf');
+      final sources = <String?>{};
+      o.addListener(() => sources.add(o.pullSource));
+      expect(await o.pull('tiny:1b'), isTrue);
+      expect(o.error, isNull);
+      expect(server.blobs[digest], gguf.length);
+      expect(server.fileRequests, 3); // missing, cut off, resumed
+      expect(sources.whereType<String>(), {'127.0.0.1'});
     });
 
     test('a bad checksum falls back to the registry', () async {

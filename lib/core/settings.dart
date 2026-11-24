@@ -177,6 +177,7 @@ class Settings extends ChangeNotifier {
       customPrompt: llmPrompt,
       vocabulary: vocabulary,
       timeout: Duration(seconds: llmTimeoutSec),
+      ollama: llmProvider == 'ollama',
     );
   }
 
