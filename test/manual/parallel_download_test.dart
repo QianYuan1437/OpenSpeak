@@ -35,11 +35,13 @@ void main() {
       void tick() {
         if (DateTime.now().difference(lastLog).inSeconds < 10) return;
         lastLog = DateTime.now();
-        log([
-          'ollama: ${o.pullStage} ${o.pullSource} ${o.pullCompleted ~/ 1000000}/${o.pullTotal ~/ 1000000} MB',
-          for (final e in m.progress.entries)
-            '${e.key}: ${e.value.source} ${e.value.received ~/ 1000000}/${e.value.total ~/ 1000000} MB',
-        ].join(' | '));
+        log(
+          [
+            'ollama: ${o.pullStage} ${o.pullSource} ${o.pullCompleted ~/ 1000000}/${o.pullTotal ~/ 1000000} MB',
+            for (final e in m.progress.entries)
+              '${e.key}: ${e.value.source} ${e.value.received ~/ 1000000}/${e.value.total ~/ 1000000} MB',
+          ].join(' | '),
+        );
       }
 
       o.addListener(() {
